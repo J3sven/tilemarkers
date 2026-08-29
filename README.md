@@ -1,4 +1,4 @@
-# Tile Marker
+# Tile Markers
 
 A RuneScape plugin for marking ground tiles.
 
