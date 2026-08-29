@@ -1,0 +1,10 @@
+{
+  "name": "Tile Marker",
+  "version": "dev",
+  "requiredDependencies": {
+    "prettyui": "prettyui"
+  },
+  "requiredPermissions": [],
+  "optionalPermissions": [],
+  "urls": {}
+}
