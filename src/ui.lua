@@ -667,7 +667,7 @@ function UI:buildWindow()
                 LABEL_SIZE_SORTED_POSITION[requestedLabelSizeEntry])
         end
     end
-    markerPage:AddText("Hold Ctrl+Shift over a tile, then right-click to mark, customize, or unmark it.")
+    markerPage:AddText("Hold Ctrl+Shift over a tile, then right-click to mark it or edit its marker.")
 
     self:updateStyleControls()
     self:setPage(self.currentPage)

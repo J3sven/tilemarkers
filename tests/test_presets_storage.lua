@@ -63,6 +63,29 @@ equal(true, Presets:updateTiles("preset_1", {
     },
 }), "preset edit replaces its tiles")
 equal(3300, Presets:get("preset_1").tiles[1].x, "edited tile reaches live preset data")
+local sourceCoord = { level = 1, x = 3300, z = 3301 }
+equal(
+    "preset_1",
+    Presets:findActiveAt(sourceCoord).id,
+    "active preset is found by canonical tile coordinate")
+equal(
+    nil,
+    Presets:findActiveAt({ level = 0, x = 3300, z = 3301 }),
+    "preset lookup requires the same floor")
+Presets.data.presets[#Presets.data.presets + 1] = {
+    id = "preset_2",
+    name = "Overlapping",
+    tiles = { sourceCoord },
+}
+equal(
+    "preset_1",
+    Presets:findActiveAt(sourceCoord).id,
+    "inactive overlapping preset is ignored")
+Presets.data.activeIds[#Presets.data.activeIds + 1] = "preset_2"
+equal(
+    "preset_2",
+    Presets:findActiveAt(sourceCoord).id,
+    "later active preset matches rendering precedence")
 equal("Edited", saved.presets[1].tiles[1].label, "edited label reaches storage")
 local emptySuccess, emptyMessage = Presets:updateTiles("preset_1", {})
 equal(false, emptySuccess, "preset edit rejects an empty tile set")

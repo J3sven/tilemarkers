@@ -151,11 +151,20 @@ local function onReady(miniMenuReadyEvent)
 
     local source = RegionBindings.toSource(target)
     local store = editStore or Tiles
-    local marked = store:contains(source)
+    local preset = editStore == nil
+        and actions.findPresetAt ~= nil
+        and actions.findPresetAt(source)
+        or nil
 
     local nativeEntryCount = miniMenu.entryCount
     local customCount = 1
-    if marked then
+    if preset ~= nil and actions.startPresetEdit ~= nil then
+        miniMenu:Add(
+            "Edit in preset",
+            actions.startPresetEdit,
+            preset.id,
+            preset.name)
+    elseif store:contains(source) then
         -- Add prepends each custom entry, so add higher priority first.
         miniMenu:Add(
             editStore and "Remove from preset" or "Unmark tile",

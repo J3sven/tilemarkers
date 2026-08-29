@@ -166,6 +166,13 @@ Minimenu.start({
     importPreset = function()
         UI:promptForPresetImport()
     end,
+    findPresetAt = function(source)
+        return Presets:findActiveAt(source)
+    end,
+    startPresetEdit = function(id, name)
+        if not UI:ensureMounted() then return false end
+        return UI:startPresetEdit(id, name)
+    end,
     editStore = function()
         return PresetEditor:isActive() and PresetEditor or nil
     end,

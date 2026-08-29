@@ -173,6 +173,9 @@ local deletedPresetID
 local excludedPresetID
 local updatedPresetID
 local updatedPresetTiles
+local presetAtSource
+local startedPresetEditID
+local startedPresetEditName
 local Presets = {
     list = function() return {} end,
     isActive = function() return false end,
@@ -192,6 +195,10 @@ local Presets = {
     query = function(_, _, _, _, excludedID)
         excludedPresetID = excludedID
         return {}
+    end,
+    findActiveAt = function(_, coord)
+        equal(source, coord, "preset lookup uses canonical source coordinate")
+        return presetAtSource
     end,
     get = function(_, id)
         return id == "preset_1" and {
@@ -302,6 +309,11 @@ local UI = {
     promptForPresetImport = function()
         promptedPresetImport = true
         return true
+    end,
+    startPresetEdit = function(_, id, name)
+        startedPresetEditID = id
+        startedPresetEditName = name
+        return initializedPresetHandlers.startEdit(id)
     end,
     rememberColour = function(_, colour)
         rememberedColour = colour
@@ -531,6 +543,24 @@ equal(true, recolouredFill, "confirmed fill state is stored")
 equal(true, recolouredOutlineCornersOnly, "confirmed corner outline is stored")
 unmarkEntry.action(table.unpack(unmarkEntry.args, 1, unmarkEntry.args.n))
 equal(source, removedSource, "unmark action removes the canonical tile")
+
+presetAtSource = {
+    id = "preset_1",
+    name = "Editable",
+}
+local presetMarkedMenu = readyMenu()
+equal(
+    "Walk here|Edit in preset|Cancel",
+    displayedLabels(presetMarkedMenu),
+    "preset-owned tile replaces the mark action with preset editing")
+local editPresetEntry = findMenuEntry(presetMarkedMenu, "Edit in preset")
+editPresetEntry.action(table.unpack(editPresetEntry.args, 1, editPresetEntry.args.n))
+equal("preset_1", startedPresetEditID, "preset tile opens its owning preset")
+equal("Editable", startedPresetEditName, "preset edit overlay receives the preset name")
+equal(true, editActive, "preset tile action immediately enters edit mode")
+equal(true, initializedPresetHandlers.cancelEdit(), "preset tile edit can be cancelled")
+equal(false, editActive, "cancel leaves preset edit mode")
+presetAtSource = nil
 
 addedEntry = nil
 promptOpen = true

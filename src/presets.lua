@@ -180,6 +180,24 @@ function Presets:isActive(id)
     return false
 end
 
+function Presets:findActiveAt(coord)
+    if coord == nil then return nil end
+
+    for presetIndex = #self.data.presets, 1, -1 do
+        local preset = self.data.presets[presetIndex]
+        if self:isActive(preset.id) then
+            for _, tile in ipairs(preset.tiles) do
+                if tile.level == coord.level
+                    and tile.x == coord.x
+                    and tile.z == coord.z then
+                    return preset
+                end
+            end
+        end
+    end
+    return nil
+end
+
 function Presets:setActive(id, active)
     if self:get(id) == nil then
         return false, "No preset selected."
