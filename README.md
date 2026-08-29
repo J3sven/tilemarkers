@@ -1,7 +1,6 @@
 # Tile Marker
 
-A RuneScape plugin for marking ground tiles with persistent colours, labels,
-and presets.
+A RuneScape plugin for marking ground tiles.
 
 ## Use
 
