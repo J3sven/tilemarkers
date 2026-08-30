@@ -262,13 +262,24 @@ local acceptedColour
 local acceptedFill
 local acceptedOutlineCornersOnly
 local acceptedLabel
-expect(UI:promptForCustomization("Existing label", 0x11223380, false, false, function(
-        labelValue, value, fill, outlineCornersOnly)
-    acceptedLabel = labelValue
-    acceptedColour = value
-    acceptedFill = fill
-    acceptedOutlineCornersOnly = outlineCornersOnly
-end), true, "colour prompt opens")
+local previewedColour
+local previewedFill
+local previewedOutlineCornersOnly
+local previewedLabel
+expect(UI:promptForCustomization("Existing label", 0x11223380, false, false, {
+    preview = function(labelValue, value, fill, outlineCornersOnly)
+        previewedLabel = labelValue
+        previewedColour = value
+        previewedFill = fill
+        previewedOutlineCornersOnly = outlineCornersOnly
+    end,
+    confirm = function(labelValue, value, fill, outlineCornersOnly)
+        acceptedLabel = labelValue
+        acceptedColour = value
+        acceptedFill = fill
+        acceptedOutlineCornersOnly = outlineCornersOnly
+    end,
+}), true, "colour prompt opens")
 expect(promptWindowOptions.title, "Tile customization", "customization window uses its new title")
 expect(promptWindowOptions.height, 416, "customization window fits its label and style controls")
 expect(UI:isPromptOpen(), true, "open colour prompt is tracked")
@@ -288,10 +299,15 @@ expect(
     "colour prompt starts from tile corner outline state")
 expect(table.concat(promptControlOrder, ","), "input,fill,picker,recent", "label is the first customization control")
 expect(promptListOptions.height, 122, "recent list fits five rows without scrolling")
+promptInput.value = "  Safe tile  "
+promptInput.options.onChange()
 promptCheckboxOptions.onChange(nil, nil, "render_fill", true)
 promptCheckboxOptions.onChange(nil, nil, "outline_corners_only", true)
 promptColourPicker:SetValue(0x445566FF)
-promptInput.value = "  Safe tile  "
+expect(previewedLabel, "Safe tile", "label edits preview immediately")
+expect(previewedColour, 0x445566FF, "colour edits preview immediately")
+expect(previewedFill, true, "fill edits preview immediately")
+expect(previewedOutlineCornersOnly, true, "corner edits preview immediately")
 promptButtons.Confirm()
 expect(acceptedLabel, "Safe tile", "confirmed customization trims and returns its label")
 expect(acceptedColour, 0x445566FF, "confirmed colour is returned")
@@ -300,18 +316,36 @@ expect(acceptedOutlineCornersOnly, true, "confirmed corner outline is returned")
 expect(storedRecentColours, "445566FF", "confirmed colour is persisted as recent")
 
 UI:rememberColour(0xAABBCCDD)
-local cancelledColour = false
-expect(UI:promptForCustomization("Keep me", 0x010203FF, true, true, function()
-    cancelledColour = true
-end), true, "second colour prompt opens")
+local cancelledCustomization = false
+local unexpectedlyConfirmed = false
+expect(UI:promptForCustomization("Keep me", 0x010203FF, true, true, {
+    confirm = function()
+        unexpectedlyConfirmed = true
+    end,
+    preview = function() end,
+    cancel = function()
+        cancelledCustomization = true
+    end,
+}), true, "second colour prompt opens")
 expect(#promptList.entries, 2, "recent colours render as list rows")
 expect(promptList.entries[1].backgroundColour, 0xAABBCCDD, "newest row uses its colour")
 expect(promptList.entries[1].text, "", "recent rows do not expose hex text")
 promptListOptions.onChange(promptList, 2, true)
 expect(promptColourPicker.value, 0x445566FF, "recent colour row updates colour picker")
 promptButtons.Cancel()
-expect(cancelledColour, false, "cancelled colour is not applied")
+expect(cancelledCustomization, true, "cancel invokes customization rollback")
+expect(unexpectedlyConfirmed, false, "cancel does not confirm customization")
 expect(UI:isPromptOpen(), false, "cancelled colour prompt closes")
+
+local closeCancelled = false
+expect(UI:promptForCustomization("Keep me", 0x010203FF, true, true, {
+    cancel = function()
+        closeCancelled = true
+    end,
+}), true, "third colour prompt opens")
+UI.colourPromptWindow:Close()
+expect(closeCancelled, true, "window close invokes customization rollback")
+expect(UI:isPromptOpen(), false, "closed colour prompt is cleared")
 
 for index = 1, 6 do
     UI:rememberColour((index << 24) | 0x000000FF)

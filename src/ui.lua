@@ -232,7 +232,7 @@ function UI:reset()
     self.colourPromptColour = nil
     self.colourPromptFill = nil
     self.colourPromptOutlineCornersOnly = nil
-    self.colourPromptCallback = nil
+    self.colourPromptActions = nil
     self.colourPicker = nil
     self.thicknessText = nil
     self.thicknessSlider = nil
@@ -269,18 +269,9 @@ function UI:destroy()
     end
     self.clearPromptWindow = nil
     self.clearPromptCallback = nil
-    if self.colourPromptWindow ~= nil and self.colourPromptWindow.root ~= nil then
-        self.colourPromptWindow:Destroy()
+    if self.colourPromptWindow ~= nil then
+        self:finishColourPrompt(false)
     end
-    self.colourPromptWindow = nil
-    self.colourPromptLabelInput = nil
-    self.colourPromptPicker = nil
-    self.colourPromptList = nil
-    self.colourPromptFillCheckbox = nil
-    self.colourPromptColour = nil
-    self.colourPromptFill = nil
-    self.colourPromptOutlineCornersOnly = nil
-    self.colourPromptCallback = nil
     for _, prompt in ipairs({
         self.presetCreateWindow,
         self.presetImportWindow,
@@ -1150,17 +1141,17 @@ function UI:rememberColour(colour)
     end
 end
 
-function UI:finishColourPrompt(accepted)
-    local prompt = self.colourPromptWindow
-    local label = trim(
-        self.colourPromptLabelInput
-            and self.colourPromptLabelInput:GetText()
-            or "")
-    local colour = self.colourPromptColour
-    local renderFill = self.colourPromptFill
-    local outlineCornersOnly = self.colourPromptOutlineCornersOnly
-    local callback = accepted and self.colourPromptCallback or nil
+local function colourPromptValues(self)
+    return trim(
+            self.colourPromptLabelInput
+                and self.colourPromptLabelInput:GetText()
+                or ""),
+        self.colourPromptColour,
+        self.colourPromptFill,
+        self.colourPromptOutlineCornersOnly
+end
 
+local function clearColourPromptState(self)
     self.colourPromptWindow = nil
     self.colourPromptLabelInput = nil
     self.colourPromptPicker = nil
@@ -1169,14 +1160,32 @@ function UI:finishColourPrompt(accepted)
     self.colourPromptColour = nil
     self.colourPromptFill = nil
     self.colourPromptOutlineCornersOnly = nil
-    self.colourPromptCallback = nil
+    self.colourPromptActions = nil
+end
 
-    if prompt ~= nil and prompt.root ~= nil then
-        prompt:Close()
-    end
-    if callback ~= nil then
+local function previewColourPrompt(self)
+    local preview = self.colourPromptActions and self.colourPromptActions.preview
+    if preview ~= nil then preview(colourPromptValues(self)) end
+end
+
+function UI:finishColourPrompt(accepted)
+    local prompt = self.colourPromptWindow
+    local label, colour, renderFill, outlineCornersOnly = colourPromptValues(self)
+    local actions = self.colourPromptActions
+    local callback = actions
+        and (accepted and actions.confirm or actions.cancel)
+        or nil
+
+    clearColourPromptState(self)
+    if prompt ~= nil and prompt.root ~= nil then prompt:Close() end
+
+    if accepted then
         self:rememberColour(colour)
-        callback(label, colour, renderFill, outlineCornersOnly)
+        if callback ~= nil then
+            callback(label, colour, renderFill, outlineCornersOnly)
+        end
+    elseif callback ~= nil then
+        callback()
     end
 end
 
@@ -1185,7 +1194,7 @@ function UI:promptForCustomization(
     initialColour,
     initialFill,
     initialOutlineCornersOnly,
-    callback)
+    actions)
     if self:isPromptOpen() or self.gameArea == nil then return false end
 
     local width = 384
@@ -1202,7 +1211,7 @@ function UI:promptForCustomization(
     self.colourPromptColour = Styles.fromColour(initialColour).outlineColour
     self.colourPromptFill = initialFill ~= false
     self.colourPromptOutlineCornersOnly = initialOutlineCornersOnly == true
-    self.colourPromptCallback = callback
+    self.colourPromptActions = actions
     local prompt
     prompt = self.prettyui.Window.new(self.gameArea, {
         title = "Tile customization",
@@ -1217,15 +1226,11 @@ function UI:promptForCustomization(
         destroyOnClose = true,
         onClose = function()
             if self.colourPromptWindow == prompt then
-                self.colourPromptWindow = nil
-                self.colourPromptLabelInput = nil
-                self.colourPromptPicker = nil
-                self.colourPromptFillCheckbox = nil
-                self.colourPromptList = nil
-                self.colourPromptColour = nil
-                self.colourPromptFill = nil
-                self.colourPromptOutlineCornersOnly = nil
-                self.colourPromptCallback = nil
+                local cancel = self.colourPromptActions
+                    and self.colourPromptActions.cancel
+                    or nil
+                clearColourPromptState(self)
+                if cancel ~= nil then cancel() end
             end
         end,
         layout = {
@@ -1242,6 +1247,9 @@ function UI:promptForCustomization(
         maxLength = 32,
         onSubmit = function()
             self:finishColourPrompt(true)
+        end,
+        onChange = function()
+            previewColourPrompt(self)
         end,
     })
     self.colourPromptFillCheckbox = prompt:AddCheckboxButton({
@@ -1262,6 +1270,7 @@ function UI:promptForCustomization(
             elseif value == "outline_corners_only" then
                 self.colourPromptOutlineCornersOnly = selected == true
             end
+            previewColourPrompt(self)
         end,
     })
     prompt:AddText({
@@ -1279,6 +1288,7 @@ function UI:promptForCustomization(
         windowTitle = "Tile colour",
         onChange = function(_, colour)
             self.colourPromptColour = colour
+            previewColourPrompt(self)
         end,
     })
     prompt:AddText("Recently used colours")

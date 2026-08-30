@@ -89,6 +89,31 @@ equal("12345678", saved.levels[0][258][54321].outlineColour, "recolour stores ex
 equal("0E2A4542", saved.levels[0][258][54321].fillColour, "recolour stores derived fill")
 equal(true, saved.levels[0][258][54321].fill, "recolour stores selected fill state")
 equal(true, saved.levels[0][258][54321].outlineCornersOnly, "corner outline persists")
+local savesBeforePreview = saveCount
+equal(
+    true,
+    Tiles:previewCustomization(added, "Preview", 0xCAFEBABE, false, false),
+    "existing tile accepts a transient customization preview")
+equal(saveCount, savesBeforePreview, "preview does not write persistent storage")
+equal("Preview", Tiles:getLabel(added), "preview label is exposed immediately")
+equal(0xCAFEBABE, Tiles:getColour(added), "preview colour is exposed immediately")
+equal(false, Tiles:getFill(added), "preview fill is exposed immediately")
+equal(false, Tiles:getOutlineCornersOnly(added), "preview corners are exposed immediately")
+queried = Tiles:query(added, 0, {
+    { source = added, target = target },
+})
+equal("Preview", queried[target].text, "preview label reaches rendered tile queries")
+equal(0xCAFEBABE, queried[target].outlineColour, "preview style reaches rendered tile queries")
+equal(
+    true,
+    Tiles:cancelCustomizationPreview(added),
+    "customization preview can be cancelled")
+equal(saveCount, savesBeforePreview, "cancelling preview does not write storage")
+equal("Safe tile", Tiles:getLabel(added), "cancel restores the pre-edit label")
+equal(0x12345678, Tiles:getColour(added), "cancel restores the pre-edit colour")
+equal(true, Tiles:getFill(added), "cancel restores the pre-edit fill")
+equal(true, Tiles:getOutlineCornersOnly(added), "cancel restores pre-edit corners")
+
 local savesBeforeCustomization = saveCount
 equal(
     true,

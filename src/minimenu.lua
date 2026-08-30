@@ -121,10 +121,19 @@ local function customizeTile(store, source)
         currentColour,
         currentFill,
         currentOutlineCornersOnly,
-        function(label, colour, fill, outlineCornersOnly)
-            store:setCustomization(
-                source, label, colour, fill, outlineCornersOnly)
-        end)
+        {
+            preview = function(label, colour, fill, outlineCornersOnly)
+                store:previewCustomization(
+                    source, label, colour, fill, outlineCornersOnly)
+            end,
+            confirm = function(label, colour, fill, outlineCornersOnly)
+                store:setCustomization(
+                    source, label, colour, fill, outlineCornersOnly)
+            end,
+            cancel = function()
+                store:cancelCustomizationPreview(source)
+            end,
+        })
 end
 
 local function onReady(miniMenuReadyEvent)

@@ -52,6 +52,7 @@ end
 
 local Tiles = {
     tiles = normalizeTiles(loadedTiles),
+    customizationPreview = nil,
 }
 
 local function storageMetadata(metadata)
@@ -87,6 +88,14 @@ end
 
 local function squareKey(coord)
     return (coord.mapSquareX << 8) | coord.mapSquareZ
+end
+
+local function coordKey(coord)
+    return string.format(
+        "%d:%d:%d",
+        coord.level,
+        squareKey(coord),
+        coord:ToPacked())
 end
 
 function Tiles:save()
@@ -181,28 +190,45 @@ local function metadataAt(tiles, coord)
     return square and square[coord:ToPacked()] or nil
 end
 
+local function displayedMetadataAt(self, coord)
+    local preview = self.customizationPreview
+    if preview ~= nil and preview.key == coordKey(coord) then
+        return preview.metadata
+    end
+    return metadataAt(self.tiles, coord)
+end
+
+local function applyCustomization(metadata, label, colour, fill, outlineCornersOnly)
+    local style = Styles.fromColour(colour, fill, outlineCornersOnly)
+    metadata.outlineColour = style.outlineColour
+    metadata.fillColour = style.fillColour
+    metadata.fill = style.fill
+    metadata.outlineCornersOnly = style.outlineCornersOnly
+    metadata.text = type(label) == "string" and label ~= "" and label or nil
+end
+
 function Tiles:contains(coord)
     return metadataAt(self.tiles, coord) ~= nil
 end
 
 function Tiles:getLabel(coord)
-    local metadata = metadataAt(self.tiles, coord)
+    local metadata = displayedMetadataAt(self, coord)
     return metadata and metadata.text or nil
 end
 
 function Tiles:getColour(coord)
-    local metadata = metadataAt(self.tiles, coord)
+    local metadata = displayedMetadataAt(self, coord)
     return metadata and metadata.outlineColour or nil
 end
 
 function Tiles:getFill(coord)
-    local metadata = metadataAt(self.tiles, coord)
+    local metadata = displayedMetadataAt(self, coord)
     if metadata == nil then return nil end
     return metadata.fill ~= false
 end
 
 function Tiles:getOutlineCornersOnly(coord)
-    local metadata = metadataAt(self.tiles, coord)
+    local metadata = displayedMetadataAt(self, coord)
     if metadata == nil then return nil end
     return metadata.outlineCornersOnly == true
 end
@@ -219,20 +245,32 @@ function Tiles:setColour(coord, colour, fill, outlineCornersOnly)
     return self:save()
 end
 
+function Tiles:previewCustomization(coord, label, colour, fill, outlineCornersOnly)
+    local metadata = metadataAt(self.tiles, coord)
+    if metadata == nil then return false end
+
+    local preview = normalizeMetadata(metadata)
+    applyCustomization(preview, label, colour, fill, outlineCornersOnly)
+    self.customizationPreview = {
+        key = coordKey(coord),
+        metadata = preview,
+    }
+    return true
+end
+
+function Tiles:cancelCustomizationPreview(coord)
+    local preview = self.customizationPreview
+    if preview == nil or preview.key ~= coordKey(coord) then return false end
+    self.customizationPreview = nil
+    return true
+end
+
 function Tiles:setCustomization(coord, label, colour, fill, outlineCornersOnly)
     local metadata = metadataAt(self.tiles, coord)
     if metadata == nil then return false end
 
-    local style = Styles.fromColour(colour, fill, outlineCornersOnly)
-    metadata.outlineColour = style.outlineColour
-    metadata.fillColour = style.fillColour
-    metadata.fill = style.fill
-    metadata.outlineCornersOnly = style.outlineCornersOnly
-    if type(label) == "string" and label ~= "" then
-        metadata.text = label
-    else
-        metadata.text = nil
-    end
+    applyCustomization(metadata, label, colour, fill, outlineCornersOnly)
+    self:cancelCustomizationPreview(coord)
     return self:save()
 end
 
@@ -252,7 +290,7 @@ function Tiles:query(from, range, regionBindings)
     local results = {}
     if regionBindings ~= nil then
         for _, binding in ipairs(regionBindings) do
-            local metadata = metadataAt(self.tiles, binding.source)
+            local metadata = displayedMetadataAt(self, binding.source)
             if metadata ~= nil then
                 results[binding.target] = metadata
             end
@@ -279,7 +317,7 @@ function Tiles:query(from, range, regionBindings)
                     local coord = CoordGrid.new(packed)
                     if math.abs(coord.x - from.x) <= range
                         and math.abs(coord.z - from.z) <= range then
-                        results[coord] = metadata
+                        results[coord] = displayedMetadataAt(self, coord) or metadata
                     end
                 end
             end

@@ -77,6 +77,12 @@ local existingFill = false
 local recolouredFill
 local existingOutlineCornersOnly = false
 local recolouredOutlineCornersOnly
+local previewedSource
+local previewedLabel
+local previewedColour
+local previewedFill
+local previewedOutlineCornersOnly
+local cancelledPreviewSource
 local queriedTiles = {}
 local queriedCoord
 local queriedDistance
@@ -137,6 +143,21 @@ local Tiles = {
         existingColour = colour
         existingFill = fill
         existingOutlineCornersOnly = outlineCornersOnly
+    end,
+    previewCustomization = function(_, coord, label, colour, fill, outlineCornersOnly)
+        previewedSource = coord
+        previewedLabel = label
+        previewedColour = colour
+        previewedFill = fill
+        previewedOutlineCornersOnly = outlineCornersOnly
+    end,
+    cancelCustomizationPreview = function(_, coord)
+        cancelledPreviewSource = coord
+        previewedSource = nil
+        previewedLabel = nil
+        previewedColour = nil
+        previewedFill = nil
+        previewedOutlineCornersOnly = nil
     end,
     setCustomization = function(_, coord, label, colour, fill, outlineCornersOnly)
         labelledSource = coord
@@ -249,6 +270,8 @@ local PresetEditor = {
     getFill = function() return true end,
     getOutlineCornersOnly = function() return false end,
     setCustomization = function() end,
+    previewCustomization = function() end,
+    cancelCustomizationPreview = function() end,
 }
 local RegionBindings = {
     resolveArea = function() return nil end,
@@ -267,6 +290,7 @@ local promptedInitialColour
 local promptedInitialFill
 local promptedInitialOutlineCornersOnly
 local rememberedColour
+local promptedCustomizationActions
 local promptedClearCount
 local clearConfirmation
 local initializedPresetHandlers
@@ -290,12 +314,12 @@ local UI = {
     end,
     isPromptOpen = function() return promptOpen end,
     promptForCustomization = function(
-        _, initialLabel, initialColour, initialFill, initialOutlineCornersOnly, callback)
+        _, initialLabel, initialColour, initialFill, initialOutlineCornersOnly, actions)
         promptedInitialLabel = initialLabel
         promptedInitialColour = initialColour
         promptedInitialFill = initialFill
         promptedInitialOutlineCornersOnly = initialOutlineCornersOnly
-        callback("Updated label", 0x445566FF, true, true)
+        promptedCustomizationActions = actions
     end,
     promptForClear = function(_, tileCount, callback)
         promptedClearCount = tileCount
@@ -535,6 +559,22 @@ equal(
     false,
     promptedInitialOutlineCornersOnly,
     "colour prompt starts from tile corner outline state")
+promptedCustomizationActions.preview("Preview label", 0xAABBCCDD, true, true)
+equal(source, previewedSource, "customization preview targets the marked canonical tile")
+equal("Preview label", previewedLabel, "label changes reach the live preview")
+equal(0xAABBCCDD, previewedColour, "colour changes reach the live preview")
+equal(true, previewedFill, "fill changes reach the live preview")
+equal(true, previewedOutlineCornersOnly, "corner changes reach the live preview")
+promptedCustomizationActions.cancel()
+equal(source, cancelledPreviewSource, "cancel clears the marked tile preview")
+equal("Existing label", existingLabel, "cancel preserves the pre-edit label")
+equal(0x12345678, existingColour, "cancel preserves the pre-edit colour")
+equal(false, existingFill, "cancel preserves the pre-edit fill state")
+equal(false, existingOutlineCornersOnly, "cancel preserves pre-edit corners")
+
+colourEntry.action(table.unpack(colourEntry.args, 1, colourEntry.args.n))
+promptedCustomizationActions.preview("Updated label", 0x445566FF, true, true)
+promptedCustomizationActions.confirm("Updated label", 0x445566FF, true, true)
 equal(source, recolouredSource, "colour action targets the marked canonical tile")
 equal(source, labelledSource, "customization label targets the marked canonical tile")
 equal("Updated label", labelledText, "confirmed customization stores its label")

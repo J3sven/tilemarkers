@@ -4,6 +4,7 @@ local Editor = {
     presetID = nil,
     presetName = nil,
     tiles = {},
+    customizationPreview = nil,
 }
 
 local function keyFor(level, x, z)
@@ -42,6 +43,22 @@ local function metadataFor(tile)
     }
 end
 
+local function displayedTile(self, coord)
+    local preview = self.customizationPreview
+    local key = coordKey(coord)
+    if preview ~= nil and preview.key == key then return preview.tile end
+    return self.tiles[key]
+end
+
+local function applyCustomization(tile, label, colour, fill, outlineCornersOnly)
+    local style = Styles.fromColour(colour, fill, outlineCornersOnly)
+    tile.label = type(label) == "string" and label ~= "" and label or nil
+    tile.outlineColour = style.outlineColour
+    tile.fillColour = style.fillColour
+    tile.fill = style.fill
+    tile.outlineCornersOnly = style.outlineCornersOnly
+end
+
 function Editor:isActive()
     return self.presetID ~= nil
 end
@@ -53,6 +70,7 @@ function Editor:begin(preset)
     self.presetID = preset.id
     self.presetName = preset.name
     self.tiles = {}
+    self.customizationPreview = nil
     for _, tile in ipairs(type(preset.tiles) == "table" and preset.tiles or {}) do
         local copied = copyTile(tile)
         self.tiles[keyFor(copied.level, copied.x, copied.z)] = copied
@@ -64,6 +82,7 @@ function Editor:cancel()
     self.presetID = nil
     self.presetName = nil
     self.tiles = {}
+    self.customizationPreview = nil
 end
 
 function Editor:contains(coord)
@@ -94,36 +113,51 @@ function Editor:remove(coord)
 end
 
 function Editor:getLabel(coord)
-    local tile = self.tiles[coordKey(coord)]
+    local tile = displayedTile(self, coord)
     return tile and tile.label or nil
 end
 
 function Editor:getColour(coord)
-    local tile = self.tiles[coordKey(coord)]
+    local tile = displayedTile(self, coord)
     return tile and tile.outlineColour or nil
 end
 
 function Editor:getFill(coord)
-    local tile = self.tiles[coordKey(coord)]
+    local tile = displayedTile(self, coord)
     if tile == nil then return nil end
     return tile.fill
 end
 
 function Editor:getOutlineCornersOnly(coord)
-    local tile = self.tiles[coordKey(coord)]
+    local tile = displayedTile(self, coord)
     if tile == nil then return nil end
     return tile.outlineCornersOnly
+end
+
+function Editor:previewCustomization(coord, label, colour, fill, outlineCornersOnly)
+    local tile = self.tiles[coordKey(coord)]
+    if tile == nil then return false end
+    local preview = copyTile(tile)
+    applyCustomization(preview, label, colour, fill, outlineCornersOnly)
+    self.customizationPreview = {
+        key = coordKey(coord),
+        tile = preview,
+    }
+    return true
+end
+
+function Editor:cancelCustomizationPreview(coord)
+    local preview = self.customizationPreview
+    if preview == nil or preview.key ~= coordKey(coord) then return false end
+    self.customizationPreview = nil
+    return true
 end
 
 function Editor:setCustomization(coord, label, colour, fill, outlineCornersOnly)
     local tile = self.tiles[coordKey(coord)]
     if tile == nil then return false end
-    local style = Styles.fromColour(colour, fill, outlineCornersOnly)
-    tile.label = type(label) == "string" and label ~= "" and label or nil
-    tile.outlineColour = style.outlineColour
-    tile.fillColour = style.fillColour
-    tile.fill = style.fill
-    tile.outlineCornersOnly = style.outlineCornersOnly
+    applyCustomization(tile, label, colour, fill, outlineCornersOnly)
+    self:cancelCustomizationPreview(coord)
     return true
 end
 
@@ -146,7 +180,7 @@ function Editor:query(from, range, regionBindings)
 
     if regionBindings ~= nil then
         for _, binding in ipairs(regionBindings) do
-            local tile = self.tiles[coordKey(binding.source)]
+            local tile = displayedTile(self, binding.source)
             if tile ~= nil then result[binding.target] = metadataFor(tile) end
         end
         return result
@@ -162,7 +196,7 @@ function Editor:query(from, range, regionBindings)
                 tile.z // 64,
                 tile.x % 64,
                 tile.z % 64)
-            result[coord] = metadataFor(tile)
+            result[coord] = metadataFor(displayedTile(self, coord) or tile)
         end
     end
     return result

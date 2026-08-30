@@ -44,6 +44,25 @@ equal(true, Editor:add(added, {
     outlineColour = 0x445566FF,
     fill = true,
 }), "working copy can add a tile")
+local target = { name = "instanced target" }
+equal(true, Editor:previewCustomization(
+    added, "Preview", 0x010203FF, false, true),
+    "working copy accepts a transient customization preview")
+equal("Preview", Editor:getLabel(added), "preview label is exposed immediately")
+equal(0x010203FF, Editor:getColour(added), "preview colour is exposed immediately")
+local previewQuery = Editor:query(existing, 30, {
+    { source = added, target = target },
+})
+equal("Preview", previewQuery[target].text, "preview reaches working-copy tile queries")
+equal(nil, Editor:export()[1].label, "preview is not committed to preset export")
+equal(
+    true,
+    Editor:cancelCustomizationPreview(added),
+    "working-copy preview can be cancelled")
+equal(nil, Editor:getLabel(added), "cancel restores the pre-edit label")
+equal(0x445566FF, Editor:getColour(added), "cancel restores the pre-edit colour")
+equal(true, Editor:getFill(added), "cancel restores the pre-edit fill")
+equal(false, Editor:getOutlineCornersOnly(added), "cancel restores pre-edit corners")
 equal(true, Editor:setCustomization(
     added, "Added", 0xAABBCCDD, false, true),
     "working copy can customize an added tile")
@@ -54,7 +73,6 @@ equal(true, Editor:getOutlineCornersOnly(added), "customized corners stay in the
 equal(1, #preset.tiles, "editing does not mutate the saved preset")
 equal(3200, preset.tiles[1].x, "saved preset keeps its original tile")
 
-local target = { name = "instanced target" }
 local queried = Editor:query(existing, 30, {
     { source = added, target = target },
 })
