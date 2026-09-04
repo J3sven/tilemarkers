@@ -1,4 +1,3 @@
--- Draw tile markers directly through the world Shapes API.
 local Draw = {}
 
 local TILE_SIZE = 512.0

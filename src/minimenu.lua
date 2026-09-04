@@ -174,7 +174,6 @@ local function onReady(miniMenuReadyEvent)
             preset.id,
             preset.name)
     elseif store:contains(source) then
-        -- Add prepends each custom entry, so add higher priority first.
         miniMenu:Add(
             editStore and "Remove from preset" or "Unmark tile",
             setTileMarked,
@@ -214,7 +213,7 @@ function Minimenu.getHover()
     if menuOpen then
         return menuHover
     end
-    if modifiersDown then
+    if modifiersDown and UI:isHoverPreviewEnabled() then
         return hoveredTile()
     end
     return nil

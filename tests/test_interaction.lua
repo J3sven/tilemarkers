@@ -285,6 +285,7 @@ local RegionBindings = {
 local drawnHover
 local drawnTiles
 local promptOpen = false
+local hoverPreviewEnabled = true
 local promptedInitialLabel
 local promptedInitialColour
 local promptedInitialFill
@@ -313,6 +314,7 @@ local UI = {
         }
     end,
     isPromptOpen = function() return promptOpen end,
+    isHoverPreviewEnabled = function() return hoverPreviewEnabled end,
     promptForCustomization = function(
         _, initialLabel, initialColour, initialFill, initialOutlineCornersOnly, actions)
         promptedInitialLabel = initialLabel
@@ -366,6 +368,10 @@ controlDown = true
 shiftDown = true
 callbacks.Draw()
 equal(hover, drawnHover, "Ctrl+Shift lights the hovered tile")
+hoverPreviewEnabled = false
+callbacks.Draw()
+equal(nil, drawnHover, "disabled hover preview stays hidden with modifiers")
+hoverPreviewEnabled = true
 keyboardBlocked = true
 callbacks.Draw()
 equal(nil, drawnHover, "blocked keyboard input hides the hover")

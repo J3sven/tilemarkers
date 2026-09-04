@@ -1,8 +1,6 @@
 local Codec = {}
 local Styles = require("src/styles")
 
--- V2 is intentionally not backwards compatible. The plugin was unreleased when
--- this format replaced TM.<ReadableName>.<payload>.
 local TOKEN_PREFIX = "TM2"
 local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 local BASE64_VALUES = {}

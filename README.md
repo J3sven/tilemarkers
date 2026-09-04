@@ -4,7 +4,6 @@ A RuneScape plugin for marking ground tiles.
 
 ## Use
 
-- Open Tile Marker from the PrettyUI ribbon.
-- Hold **Ctrl+Shift** and right-click a visible tile to mark it or edit its marker.
-- Manage marker styles and shareable presets from the plugin window.
-- Right-click the world map button for bulk actions on visible markers.
+- Manage defaults and presets from the tilemarkers plugin window.
+- Hold **Ctrl+Shift** and right-click any tile to mark it or edit it's marker.
+- Right-click the world map button to access bulk actions on visible markers.

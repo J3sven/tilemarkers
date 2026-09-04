@@ -9,6 +9,7 @@ local MAX_RECENT_COLOURS = 5
 local OUTLINE_THICKNESS_STORAGE_KEY = "markerOutlineThicknessTenths"
 local FONT_SIZE_STORAGE_KEY = "markerFontSize"
 local IGNORE_DEPTH_STORAGE_KEY = "markerIgnoreDepth"
+local HOVER_PREVIEW_STORAGE_KEY = "markerHoverPreview"
 local EMPTY_HOVER_STYLE = {
     outlineColour = 0xFFFFFF90,
     fillColour = 0xFFFFFF38,
@@ -196,6 +197,8 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
     self.recentColours = parseRecentColours(
         PersistentDB:GetString(RECENT_COLOURS_STORAGE_KEY))
     self.ignoreDepth = PersistentDB:GetBool(IGNORE_DEPTH_STORAGE_KEY) == true
+    self.hoverPreviewEnabled =
+        PersistentDB:GetBool(HOVER_PREVIEW_STORAGE_KEY) ~= false
     local storedLabelSize = PersistentDB:GetInt(FONT_SIZE_STORAGE_KEY)
     self.labelSize = normalizeLabelSize(storedLabelSize)
     self.outlineThickness = clamp(
@@ -487,6 +490,10 @@ function UI:updateStyleControls()
             "Outline thickness: %.1f", self.outlineThickness)
     end
 end
+function UI:isHoverPreviewEnabled()
+    return self.hoverPreviewEnabled ~= false
+end
+
 
 
 function UI:setPanelOpen(open)
@@ -554,15 +561,29 @@ function UI:buildWindow()
     local markerPage = self.tabs:GetPage(1)
     self.ignoreDepthCheckbox = markerPage:AddCheckboxButton({
         {
-            text = "Draw markers over scenery",
+            text = "Draw over scenery",
             value = "ignore_depth",
             selected = self.ignoreDepth,
+            tooltip = "Draw every tile marker over scene geometry, including ground decorations.",
+        },
+        {
+            text = "Show hover preview",
+            value = "hover_preview",
+            selected = self.hoverPreviewEnabled,
+            tooltip = "Preview the tile under the cursor while Ctrl+Shift is held.",
         },
     }, {
-        tooltip = "Draw every tile marker over scene geometry, including ground decorations.",
-        onChange = function(_, _, _, selected)
-            self.ignoreDepth = selected == true
-            PersistentDB:SetBool(IGNORE_DEPTH_STORAGE_KEY, self.ignoreDepth)
+        inline = true,
+        onChange = function(_, _, changedValue, selected)
+            if changedValue == "ignore_depth" then
+                self.ignoreDepth = selected == true
+                PersistentDB:SetBool(IGNORE_DEPTH_STORAGE_KEY, self.ignoreDepth)
+            elseif changedValue == "hover_preview" then
+                self.hoverPreviewEnabled = selected == true
+                PersistentDB:SetBool(
+                    HOVER_PREVIEW_STORAGE_KEY,
+                    self.hoverPreviewEnabled)
+            end
         end,
     })
     markerPage:AddText({

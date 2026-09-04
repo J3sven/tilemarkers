@@ -8,6 +8,7 @@ local function expect(actual, expected, message)
 end
 
 local storedRecentColours
+local storedHoverPreview
 PersistentDB = {
     GetString = function() return nil end,
     GetInt = function(_, key)
@@ -18,6 +19,10 @@ PersistentDB = {
     GetBool = function(_, key)
         if key == "markerIgnoreDepth" then return true end
         return nil
+    end,
+    SetBool = function(_, key, value)
+        if key == "markerHoverPreview" then storedHoverPreview = value end
+        return true
     end,
     SetString = function(_, key, value)
         if key == "recentMarkerColours" then storedRecentColours = value end
@@ -140,6 +145,7 @@ package.loaded["src/ui"] = nil
 local UI = require("src/ui")
 UI:init({}, prettyui, draw)
 expect(UI:getStyle().fill, false, "new marker fill defaults off")
+expect(UI:isHoverPreviewEnabled(), true, "hover preview defaults on")
 UI.canvas = {
     Clear = function() end,
     AddText = function(_, x, y, width, height, text, textConfig)
@@ -463,9 +469,12 @@ makeControl = function()
         self.addedComponents[#self.addedComponents + 1] = child
         return child
     end
-    control.AddCheckboxButton = function(self)
+    control.AddCheckboxButton = function(self, entries, options)
         self.addedControls[#self.addedControls + 1] = "checkbox"
-        return addControl(self)
+        local child = addControl(self)
+        child.entries = entries
+        child.options = options
+        return child
     end
     control.AddColourPicker = addControl
     control.AddComboBox = addControl
@@ -573,6 +582,16 @@ expect(mountedTabs[2].value, "presets", "presets tab combines management and tra
 expect(UI.thicknessSlider ~= nil, true, "outline controls mount on the markers page")
 expect(UI.ignoreDepthCheckbox ~= nil, true, "depth control mounts on the markers page")
 expect(mountedPages[1].addedControls[1], "checkbox", "draw-over-scenery is first")
+local markerOptions = mountedPages[1].addedComponents[1]
+expect(
+    markerOptions.entries[2].value,
+    "hover_preview",
+    "hover preview toggle is available")
+expect(markerOptions.entries[2].selected, true, "hover preview toggle defaults on")
+expect(markerOptions.options.inline, true, "marker toggles share one row")
+markerOptions.options.onChange(nil, nil, "hover_preview", false)
+expect(UI:isHoverPreviewEnabled(), false, "hover preview toggle updates runtime state")
+expect(storedHoverPreview, false, "hover preview toggle persists")
 expect(UI.labelSizeCombo ~= nil, true, "label size control mounts on the markers page")
 expect(
     table.concat(mountedPages[2].addedControls, ","),
