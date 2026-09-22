@@ -675,4 +675,32 @@ expect(
 failedSaveOverlay.addedComponents[4].action()
 
 
+-- Cancelling during logout must not inspect native input contents.
+UI.colourPromptLabelInput = {
+    GetText = function() error("read after interface unload") end,
+}
+local cancelCount = 0
+UI.colourPromptActions = { cancel = function() cancelCount = cancelCount + 1 end }
+UI:finishColourPrompt(false)
+expect(cancelCount, 1, "logout cancellation preserves the cancel callback")
+
+local destroyedPrompts = {}
+local function retainedPrompt(name)
+    return { root = {}, Destroy = function() destroyedPrompts[name] = true end }
+end
+UI.presetCreateWindow = nil
+UI.presetImportWindow = retainedPrompt("import")
+UI.presetRenameWindow = nil
+UI.presetExportWindow = retainedPrompt("export")
+UI.presetDeleteWindow = retainedPrompt("delete")
+UI.canvas = { Destroy = function() error("destroy after interface unload") end }
+id.Component = { TOPLEVEL_V2__GAME_AREA = 1 }
+ui.Interfaces = { GetComponent = function() return nil end }
+UI:destroy()
+expect(destroyedPrompts.import, true, "missing create prompt does not skip import cleanup")
+expect(destroyedPrompts.export, true, "missing rename prompt does not skip export cleanup")
+expect(destroyedPrompts.delete, true, "all retained prompts are cleaned up")
+expect(UI.gameArea, nil, "logout forgets the old game area")
+expect(UI.canvas, nil, "logout discards the dead native canvas")
+
 print("test_global_config: ok")

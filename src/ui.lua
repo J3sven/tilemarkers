@@ -275,17 +275,21 @@ function UI:destroy()
     if self.colourPromptWindow ~= nil then
         self:finishColourPrompt(false)
     end
-    for _, prompt in ipairs({
-        self.presetCreateWindow,
-        self.presetImportWindow,
-        self.presetRenameWindow,
-        self.presetExportWindow,
-        self.presetDeleteWindow,
+    for _, field in ipairs({
+        "presetCreateWindow",
+        "presetImportWindow",
+        "presetRenameWindow",
+        "presetExportWindow",
+        "presetDeleteWindow",
     }) do
+        local prompt = self[field]
         if prompt ~= nil and prompt.root ~= nil then prompt:Destroy() end
     end
     if self.window ~= nil then self.window:Destroy() end
-    if self.canvas ~= nil then self.canvas:Destroy() end
+    if self.canvas ~= nil and self.gameArea ~= nil
+        and ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA) == self.gameArea then
+        self.canvas:Destroy()
+    end
     self:reset()
 end
 
@@ -689,12 +693,12 @@ end
 function UI:ensureMounted()
     local currentGameArea = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     if currentGameArea == nil then
-        self:reset()
+        self:destroy()
         return false
     end
 
     if currentGameArea ~= self.gameArea then
-        self:reset()
+        self:destroy()
         self.gameArea = currentGameArea
     end
 
@@ -1191,7 +1195,10 @@ end
 
 function UI:finishColourPrompt(accepted)
     local prompt = self.colourPromptWindow
-    local label, colour, renderFill, outlineCornersOnly = colourPromptValues(self)
+    local label, colour, renderFill, outlineCornersOnly
+    if accepted then
+        label, colour, renderFill, outlineCornersOnly = colourPromptValues(self)
+    end
     local actions = self.colourPromptActions
     local callback = actions
         and (accepted and actions.confirm or actions.cancel)

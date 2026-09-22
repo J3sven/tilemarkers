@@ -1,6 +1,6 @@
 {
   "name": "Tile Marker",
-  "version": "dev",
+  "version": "0.1.0",
   "requiredDependencies": {
     "prettyui": "prettyui"
   },
