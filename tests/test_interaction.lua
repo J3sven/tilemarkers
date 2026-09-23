@@ -310,7 +310,6 @@ local UI = {
         return {
             outlineColour = 0x12345678,
             fillColour = 0x0E2A4542,
-            fill = false,
         }
     end,
     isPromptOpen = function() return promptOpen end,
@@ -546,7 +545,6 @@ selectedEntry.action(table.unpack(selectedEntry.args, 1, selectedEntry.args.n))
 equal(source, addedSource, "mark action stores the canonical tile")
 equal(0x12345678, addedMetadata.outlineColour, "mark action stores selected outline")
 equal(0x0E2A4542, addedMetadata.fillColour, "mark action stores derived fill")
-equal(false, addedMetadata.fill, "new markers default fill off")
 equal(0x12345678, rememberedColour, "mark action records its colour as recent")
 equal(nil, labelledSource, "mark action does not open customization")
 

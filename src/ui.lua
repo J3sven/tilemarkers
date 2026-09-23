@@ -10,6 +10,8 @@ local OUTLINE_THICKNESS_STORAGE_KEY = "markerOutlineThicknessTenths"
 local FONT_SIZE_STORAGE_KEY = "markerFontSize"
 local IGNORE_DEPTH_STORAGE_KEY = "markerIgnoreDepth"
 local HOVER_PREVIEW_STORAGE_KEY = "markerHoverPreview"
+local FILL_STORAGE_KEY = "markerFill"
+local OUTLINE_CORNERS_STORAGE_KEY = "markerOutlineCornersOnly"
 local EMPTY_HOVER_STYLE = {
     outlineColour = 0xFFFFFF90,
     fillColour = 0xFFFFFF38,
@@ -39,8 +41,8 @@ local function labelColour(outlineColour)
     return lightenColour(lightenColour(outlineColour))
 end
 
-local function markedHoverStyle(metadata)
-    local style = Styles.normalize(metadata)
+local function markedHoverStyle(metadata, defaults)
+    local style = Styles.normalize(metadata, defaults)
     style.outlineColour = lightenColour(style.outlineColour)
     style.fillColour = lightenColour(style.fillColour)
     return style
@@ -68,20 +70,6 @@ local function encodeRecentColours(colours)
     return table.concat(encoded, ",")
 end
 
-local function recentColourEntries(colours)
-    local entries = {}
-    for index, colour in ipairs(colours) do
-        local highlighted = lightenColour(colour)
-        entries[index] = {
-            id = index,
-            text = "",
-            backgroundColour = colour,
-            hoverColour = highlighted,
-            selectedColour = highlighted,
-        }
-    end
-    return entries
-end
 
 
 local WINDOW_WIDTH = 416
@@ -199,6 +187,10 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
     self.ignoreDepth = PersistentDB:GetBool(IGNORE_DEPTH_STORAGE_KEY) == true
     self.hoverPreviewEnabled =
         PersistentDB:GetBool(HOVER_PREVIEW_STORAGE_KEY) ~= false
+    self.globalStyle = {
+        fill = PersistentDB:GetBool(FILL_STORAGE_KEY) == true,
+        outlineCornersOnly = PersistentDB:GetBool(OUTLINE_CORNERS_STORAGE_KEY) == true,
+    }
     local storedLabelSize = PersistentDB:GetInt(FONT_SIZE_STORAGE_KEY)
     self.labelSize = normalizeLabelSize(storedLabelSize)
     self.outlineThickness = clamp(
@@ -206,8 +198,7 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
         0.0,
         10.0)
     self.currentStyle = Styles.fromColour(
-        PersistentDB:GetInt(OUTLINE_COLOUR_STORAGE_KEY),
-        false)
+        PersistentDB:GetInt(OUTLINE_COLOUR_STORAGE_KEY))
     self.ribbonRegistration = self.prettyui.RibbonBar.Register({
         id = "tilemarkers",
         object = config.Obj.ROOFTILE,
@@ -230,8 +221,6 @@ function UI:reset()
     self.colourPromptWindow = nil
     self.colourPromptLabelInput = nil
     self.colourPromptPicker = nil
-    self.colourPromptList = nil
-    self.colourPromptFillCheckbox = nil
     self.colourPromptColour = nil
     self.colourPromptFill = nil
     self.colourPromptOutlineCornersOnly = nil
@@ -239,7 +228,6 @@ function UI:reset()
     self.colourPicker = nil
     self.thicknessText = nil
     self.thicknessSlider = nil
-    self.ignoreDepthCheckbox = nil
     self.labelSizeCombo = nil
     self.presetPage = nil
     self.presetPanels = {}
@@ -563,7 +551,7 @@ function UI:buildWindow()
     })
 
     local markerPage = self.tabs:GetPage(1)
-    self.ignoreDepthCheckbox = markerPage:AddCheckboxButton({
+    markerPage:AddCheckboxButton({
         {
             text = "Draw over scenery",
             value = "ignore_depth",
@@ -576,8 +564,19 @@ function UI:buildWindow()
             selected = self.hoverPreviewEnabled,
             tooltip = "Preview the tile under the cursor while Ctrl+Shift is held.",
         },
+        {
+            text = "Render fill",
+            value = "fill",
+            selected = self.globalStyle.fill,
+            tooltip = "Fill tile markers unless overridden in tile customization.",
+        },
+        {
+            text = "Draw outline corners only",
+            value = "outlineCornersOnly",
+            selected = self.globalStyle.outlineCornersOnly,
+            tooltip = "Draw only the outline corners unless overridden in tile customization.",
+        },
     }, {
-        inline = true,
         onChange = function(_, _, changedValue, selected)
             if changedValue == "ignore_depth" then
                 self.ignoreDepth = selected == true
@@ -587,6 +586,11 @@ function UI:buildWindow()
                 PersistentDB:SetBool(
                     HOVER_PREVIEW_STORAGE_KEY,
                     self.hoverPreviewEnabled)
+            elseif changedValue == "fill" or changedValue == "outlineCornersOnly" then
+                self.globalStyle[changedValue] = selected == true
+                local key = changedValue == "fill"
+                    and FILL_STORAGE_KEY or OUTLINE_CORNERS_STORAGE_KEY
+                PersistentDB:SetBool(key, selected == true)
             end
         end,
     })
@@ -605,7 +609,7 @@ function UI:buildWindow()
         windowTitle = "Default marker colour",
         tooltip = "Choose the outline colour. Tile fills use a darker, more transparent version.",
         onChange = function(_, colour)
-            self.currentStyle = Styles.fromColour(colour, false)
+            self.currentStyle = Styles.fromColour(colour)
             PersistentDB:SetInt(OUTLINE_COLOUR_STORAGE_KEY, colour)
         end,
     })
@@ -1161,9 +1165,6 @@ function UI:rememberColour(colour)
     PersistentDB:SetString(
         RECENT_COLOURS_STORAGE_KEY,
         encodeRecentColours(self.recentColours))
-    if self.colourPromptList ~= nil then
-        self.colourPromptList:SetEntries(recentColourEntries(self.recentColours))
-    end
 end
 
 local function colourPromptValues(self)
@@ -1180,8 +1181,6 @@ local function clearColourPromptState(self)
     self.colourPromptWindow = nil
     self.colourPromptLabelInput = nil
     self.colourPromptPicker = nil
-    self.colourPromptList = nil
-    self.colourPromptFillCheckbox = nil
     self.colourPromptColour = nil
     self.colourPromptFill = nil
     self.colourPromptOutlineCornersOnly = nil
@@ -1226,7 +1225,7 @@ function UI:promptForCustomization(
     if self:isPromptOpen() or self.gameArea == nil then return false end
 
     local width = 384
-    local height = 416
+    local height = 328
     local x = clamp(
         math.floor((self.gameArea.width - width) / 2),
         0,
@@ -1237,8 +1236,9 @@ function UI:promptForCustomization(
         math.max(0, self.gameArea.height - height))
 
     self.colourPromptColour = Styles.fromColour(initialColour).outlineColour
-    self.colourPromptFill = initialFill ~= false
-    self.colourPromptOutlineCornersOnly = initialOutlineCornersOnly == true
+    -- Keep inherited values nil until their checkbox is changed.
+    self.colourPromptFill = initialFill
+    self.colourPromptOutlineCornersOnly = initialOutlineCornersOnly
     self.colourPromptActions = actions
     local prompt
     prompt = self.prettyui.Window.new(self.gameArea, {
@@ -1280,16 +1280,18 @@ function UI:promptForCustomization(
             previewColourPrompt(self)
         end,
     })
-    self.colourPromptFillCheckbox = prompt:AddCheckboxButton({
+    prompt:AddCheckboxButton({
         {
             text = "Render fill",
             value = "render_fill",
-            selected = self.colourPromptFill,
+            selected = initialFill == true
+                or (initialFill == nil and self.globalStyle.fill),
         },
         {
             text = "Draw outline corners only",
             value = "outline_corners_only",
-            selected = self.colourPromptOutlineCornersOnly,
+            selected = initialOutlineCornersOnly == true
+                or (initialOutlineCornersOnly == nil and self.globalStyle.outlineCornersOnly),
         },
     }, {
         onChange = function(_, _, value, selected)
@@ -1320,18 +1322,22 @@ function UI:promptForCustomization(
         end,
     })
     prompt:AddText("Recently used colours")
-    self.colourPromptList = prompt:AddList({
-        height = 122,
-        entryHeight = 24,
-        maxSelected = 1,
-        entries = recentColourEntries(self.recentColours),
-        onChange = function(_, entryID, selected)
-            local colour = selected and self.recentColours[entryID] or nil
-            if colour ~= nil then
-                self.colourPromptPicker:SetValue(colour)
-            end
-        end,
-    })
+    for index, colour in ipairs(self.recentColours) do
+        local button = prompt:AddSimpleButton("", function()
+            self.colourPromptPicker:SetValue(colour)
+        end, {
+            inline = index > 1,
+            width = 32,
+            height = 32,
+            tooltip = "Use recent colour",
+        })
+        local swatch = ui.Rectangle.new(button.root)
+        swatch:SetPos(4, 4)
+        swatch:SetSize(24, 24)
+        swatch.fill = true
+        swatch.rgba = colour
+        swatch.clickthrough = true
+    end
     prompt:AddFancyButton("Confirm", function()
         self:finishColourPrompt(true)
     end, {
@@ -1353,7 +1359,7 @@ function UI:getStyle()
 end
 
 function UI:drawTile(coord, metadata, style)
-    style = style or Styles.normalize(metadata)
+    style = style or Styles.normalize(metadata, self.globalStyle)
     local drawn = self.renderer.Tile{
         coordGrid = coord,
         outlineColour = style.outlineColour,
@@ -1410,7 +1416,7 @@ function UI:draw(tiles, hover)
             or nil
         if existing ~= nil then
             existing.coord = hover
-            existing.style = markedHoverStyle(existing.metadata)
+            existing.style = markedHoverStyle(existing.metadata, self.globalStyle)
         else
             local entry = {
                 coord = hover,

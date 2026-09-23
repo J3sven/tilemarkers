@@ -224,13 +224,13 @@ end
 function Tiles:getFill(coord)
     local metadata = displayedMetadataAt(self, coord)
     if metadata == nil then return nil end
-    return metadata.fill ~= false
+    return metadata.fill
 end
 
 function Tiles:getOutlineCornersOnly(coord)
     local metadata = displayedMetadataAt(self, coord)
     if metadata == nil then return nil end
-    return metadata.outlineCornersOnly == true
+    return metadata.outlineCornersOnly
 end
 
 function Tiles:setColour(coord, colour, fill, outlineCornersOnly)

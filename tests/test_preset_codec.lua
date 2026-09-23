@@ -122,6 +122,23 @@ for index = 1, 100 do
 end
 cases[#cases + 1] = { name = "Repeated labels", tiles = repeatedLabels }
 
+local inheritedStyles = {
+    {},
+    { fill = false },
+    { fill = true },
+    { outlineCornersOnly = false },
+    { outlineCornersOnly = true },
+    { fill = false, outlineCornersOnly = false },
+    { fill = false, outlineCornersOnly = true },
+    { fill = true, outlineCornersOnly = false },
+    { fill = true, outlineCornersOnly = true },
+}
+for index, tile in ipairs(inheritedStyles) do
+    tile.x = 3400 + index
+    tile.z = 3400
+end
+cases[#cases + 1] = { name = "Independent inheritance", tiles = inheritedStyles }
+
 for _, case in ipairs(cases) do
     local token = roundTrip(case.name, case.tiles)
     print(string.format("%-24s %5d tiles %5d characters", case.name, #case.tiles, #token))
@@ -166,5 +183,45 @@ local reported, reportedError = Codec.decode(
 assert(reported ~= nil, reportedError)
 equal("yanille", reported.name, "reported export name decodes")
 equal(3, #reported.tiles, "reported export tiles decode")
+
+-- A legacy non-Morton fixture: unnamed preset, tile (-1, 0), colours
+-- 0x11223344/0x55667788, thickness 2, no label. Only the style flags vary.
+local function styleFlagToken(flags)
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    local third = 33 + (flags >> 6)
+    local fourth = 1 + (flags & 0x3F)
+    return "TM2AQABAQABESIzRFVmd4"
+        .. alphabet:sub(third, third) .. alphabet:sub(fourth, fourth) .. "FAA"
+end
+
+for flags = 0, 3 do
+    local token = styleFlagToken(flags)
+    local decoded, decodeError = Codec.decode(token)
+    assert(decoded, decodeError)
+    equal((flags & 1) ~= 0, decoded.tiles[1].fill, "legacy explicit fill")
+    equal((flags & 2) ~= 0, decoded.tiles[1].outlineCornersOnly, "legacy explicit corners")
+    equal(token, Codec.encode(decoded.name, decoded.tiles), "explicit token encoding is unchanged")
+end
+
+for _, style in ipairs({
+    { flags = 0x04, outlineCornersOnly = false },
+    { flags = 0x06, outlineCornersOnly = true },
+    { flags = 0x08, fill = false },
+    { flags = 0x09, fill = true },
+    { flags = 0x0C },
+}) do
+    local token = styleFlagToken(style.flags)
+    local decoded, decodeError = Codec.decode(token)
+    assert(decoded, decodeError)
+    equal(style.fill, decoded.tiles[1].fill, "fixture fill inheritance")
+    equal(style.outlineCornersOnly, decoded.tiles[1].outlineCornersOnly, "fixture corner inheritance")
+    equal(token, Codec.encode(decoded.name, decoded.tiles), "inheritance uses assigned flag bits")
+end
+
+for _, flags in ipairs({ 0x05, 0x07, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x10, 0x20, 0x40, 0x80 }) do
+    local decoded, decodeError = Codec.decode(styleFlagToken(flags))
+    equal(nil, decoded, string.format("invalid style flags 0x%02X are rejected", flags))
+    assert(decodeError ~= nil, "invalid style flags report an error")
+end
 
 print("preset_codec tests passed")

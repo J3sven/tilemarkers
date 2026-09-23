@@ -10,8 +10,6 @@ end
 local defaults = Styles.normalize()
 equal(0xC864FFFF, defaults.outlineColour, "default outline")
 equal(0xA050CC8C, defaults.fillColour, "default fill is darker and more transparent")
-equal(true, defaults.fill, "default fill enabled")
-equal(false, defaults.outlineCornersOnly, "default outline remains continuous")
 equal(2.0, defaults.outlineThickness, "default thickness")
 
 local custom = Styles.normalize({
@@ -59,5 +57,19 @@ local roundedStructuredColours = Styles.normalize({
 })
 equal(0xB3489FFF, roundedStructuredColours.outlineColour, "rounded outline alpha recovery")
 equal(0x395E2D8C, roundedStructuredColours.fillColour, "rounded fill alpha recovery")
+
+local globals = { fill = true, outlineCornersOnly = false }
+local inherited = Styles.fromColour(0x123456FF)
+local resolved = Styles.normalize(Styles.copy(inherited), globals)
+equal(true, resolved.fill, "unset fill inherits enabled global")
+equal(false, resolved.outlineCornersOnly, "unset corners inherit disabled global")
+globals.fill = false
+globals.outlineCornersOnly = true
+resolved = Styles.normalize(inherited, globals)
+equal(false, resolved.fill, "inherited fill follows global changes")
+equal(true, resolved.outlineCornersOnly, "inherited corners follow global changes")
+resolved = Styles.normalize({ fill = true, outlineCornersOnly = false }, globals)
+equal(true, resolved.fill, "explicit enabled fill overrides disabled global")
+equal(false, resolved.outlineCornersOnly, "explicit disabled corners override enabled global")
 
 print("test_styles: ok")

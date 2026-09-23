@@ -406,12 +406,13 @@ function Codec.encode(name, tiles)
     local styleIndexes = {}
     for _, tile in ipairs(ordered) do
         local thickness = math.floor(tile.outlineThickness * 10 + 0.5)
+        local styleFlags = (tile.fill == nil and 0x04 or tile.fill and 1 or 0)
+            | (tile.outlineCornersOnly == nil and 0x08 or tile.outlineCornersOnly and 2 or 0)
         local styleKey = string.format(
-            "%08X:%08X:%d:%d:%d",
+            "%08X:%08X:%d:%d",
             tile.outlineColour,
             tile.fillColour,
-            tile.fill and 1 or 0,
-            tile.outlineCornersOnly and 1 or 0,
+            styleFlags,
             thickness)
         local styleIndex = styleIndexes[styleKey]
         if styleIndex == nil then
@@ -420,8 +421,7 @@ function Codec.encode(name, tiles)
             styles[#styles + 1] = {
                 outlineColour = tile.outlineColour,
                 fillColour = tile.fillColour,
-                fill = tile.fill,
-                outlineCornersOnly = tile.outlineCornersOnly,
+                flags = styleFlags,
                 thickness = thickness,
             }
         end
@@ -441,10 +441,7 @@ function Codec.encode(name, tiles)
     for _, style in ipairs(styles) do
         writeUInt32(parts, style.outlineColour)
         writeUInt32(parts, style.fillColour)
-        parts[#parts + 1] = string.char(
-            (style.fill and 1 or 0)
-                | (style.outlineCornersOnly and 2 or 0),
-            style.thickness)
+        parts[#parts + 1] = string.char(style.flags, style.thickness)
     end
     for _, tile in ipairs(ordered) do
         writeVaruint(parts, (tile.styleIndex << 1) | (tile.label ~= "" and 1 or 0))
@@ -593,15 +590,25 @@ function Codec.decode(token)
         local styleFlags = readByte(reader)
         local thickness = readByte(reader)
         if outlineColour == nil or fillColour == nil or styleFlags == nil
-            or (styleFlags & 0xFC) ~= 0 or thickness == nil or thickness > 100
+            or (styleFlags & 0xF0) ~= 0
+            or (styleFlags & 0x05) == 0x05 or (styleFlags & 0x0A) == 0x0A
+            or thickness == nil or thickness > 100
         then
             return nil, "Invalid tile style in preset token."
+        end
+        local fill
+        if (styleFlags & 0x04) == 0 then
+            fill = (styleFlags & 1) ~= 0
+        end
+        local outlineCornersOnly
+        if (styleFlags & 0x08) == 0 then
+            outlineCornersOnly = (styleFlags & 2) ~= 0
         end
         styles[index] = {
             outlineColour = outlineColour,
             fillColour = fillColour,
-            fill = (styleFlags & 1) ~= 0,
-            outlineCornersOnly = (styleFlags & 2) ~= 0,
+            fill = fill,
+            outlineCornersOnly = outlineCornersOnly,
             outlineThickness = thickness / 10,
         }
     end

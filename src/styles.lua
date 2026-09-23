@@ -68,7 +68,12 @@ local function legacyStyle(metadata)
     }
 end
 
-function Styles.normalize(metadata)
+local function booleanOrDefault(value, fallback)
+    if value == nil then return fallback end
+    return value == true
+end
+
+function Styles.normalize(metadata, defaults)
     metadata = type(metadata) == "table" and metadata or {}
     local legacy = legacyStyle(metadata)
     local outlineColour = rgba(
@@ -83,8 +88,9 @@ function Styles.normalize(metadata)
             metadata.fillColour,
             legacy and legacy.fillColour or defaultFill,
             FILL_ALPHA),
-        fill = metadata.fill ~= false,
-        outlineCornersOnly = metadata.outlineCornersOnly == true,
+        fill = booleanOrDefault(metadata.fill, defaults and defaults.fill),
+        outlineCornersOnly = booleanOrDefault(
+            metadata.outlineCornersOnly, defaults and defaults.outlineCornersOnly),
         outlineThickness = clamp(
             tonumber(metadata.outlineThickness) or DEFAULT_THICKNESS,
             0.0,
@@ -97,8 +103,8 @@ function Styles.fromColour(colour, fill, outlineCornersOnly)
     return {
         outlineColour = outlineColour,
         fillColour = derivedFillColour(outlineColour),
-        fill = fill ~= false,
-        outlineCornersOnly = outlineCornersOnly == true,
+        fill = booleanOrDefault(fill),
+        outlineCornersOnly = booleanOrDefault(outlineCornersOnly),
         outlineThickness = DEFAULT_THICKNESS,
     }
 end

@@ -1,10 +1,9 @@
 {
   "name": "Tile Marker",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "contactEmailAddress": "tilemarkers@nevs.me",
   "requiredDependencies": {
     "prettyui": "prettyui"
   },
-  "requiredPermissions": [],
-  "optionalPermissions": [],
-  "urls": {}
+  "optionalDependencies": {}
 }

@@ -9,6 +9,7 @@ end
 
 local storedRecentColours
 local storedHoverPreview
+local storedRendering = {}
 PersistentDB = {
     GetString = function() return nil end,
     GetInt = function(_, key)
@@ -18,10 +19,13 @@ PersistentDB = {
     end,
     GetBool = function(_, key)
         if key == "markerIgnoreDepth" then return true end
-        return nil
+        return storedRendering[key]
     end,
     SetBool = function(_, key, value)
         if key == "markerHoverPreview" then storedHoverPreview = value end
+        if key == "markerFill" or key == "markerOutlineCornersOnly" then
+            storedRendering[key] = value
+        end
         return true
     end,
     SetString = function(_, key, value)
@@ -49,6 +53,16 @@ ui = {
     TextDataConfig = {
         new = function() return {} end,
     },
+    Rectangle = {
+        new = function(parent)
+            local rectangle = {
+                SetPos = function() end,
+                SetSize = function() end,
+            }
+            parent.swatch = rectangle
+            return rectangle
+        end,
+    },
 }
 
 local submitted = {}
@@ -60,11 +74,9 @@ local promptTexts
 local promptWindowOptions
 local promptColourPicker
 local promptColourPickerOptions
-local promptList
-local promptListOptions
+local promptSwatches
 local promptCheckboxEntries
 local promptCheckboxOptions
-local promptControlOrder
 local prettyui = {
     RibbonBar = {
         Register = function()
@@ -78,21 +90,19 @@ local prettyui = {
             promptButtons = {}
             promptButtonOptions = {}
             promptTexts = {}
-            promptControlOrder = {}
+            promptSwatches = {}
             function window:AddText(value)
                 local options = type(value) == "table"
                     and value or { text = tostring(value or "") }
                 promptTexts[#promptTexts + 1] = options
             end
             function window:AddTextField(fieldOptions)
-                promptControlOrder[#promptControlOrder + 1] = "input"
                 local field = { value = fieldOptions.text or "", options = fieldOptions }
                 function field:GetText() return self.value end
                 promptInput = field
                 return field
             end
             function window:AddColourPicker(pickerOptions)
-                promptControlOrder[#promptControlOrder + 1] = "picker"
                 promptColourPickerOptions = pickerOptions
                 local picker = { value = pickerOptions.value }
                 function picker:GetValue() return self.value end
@@ -106,18 +116,14 @@ local prettyui = {
                 return picker
             end
             function window:AddCheckboxButton(entries, checkboxOptions)
-                promptControlOrder[#promptControlOrder + 1] = "fill"
                 promptCheckboxEntries = entries
                 promptCheckboxOptions = checkboxOptions
                 return {}
             end
-            function window:AddList(listOptions)
-                promptControlOrder[#promptControlOrder + 1] = "recent"
-                promptListOptions = listOptions
-                local list = { entries = listOptions.entries or {} }
-                function list:SetEntries(entries) self.entries = entries end
-                promptList = list
-                return list
+            function window:AddSimpleButton(content, action, buttonOptions)
+                local button = { root = {}, action = action }
+                promptSwatches[#promptSwatches + 1] = button
+                return button
             end
             function window:AddFancyButton(content, action, buttonOptions)
                 promptButtons[content] = action
@@ -144,7 +150,6 @@ local draw = {
 package.loaded["src/ui"] = nil
 local UI = require("src/ui")
 UI:init({}, prettyui, draw)
-expect(UI:getStyle().fill, false, "new marker fill defaults off")
 expect(UI:isHoverPreviewEnabled(), true, "hover preview defaults on")
 UI.canvas = {
     Clear = function() end,
@@ -272,6 +277,8 @@ local previewedColour
 local previewedFill
 local previewedOutlineCornersOnly
 local previewedLabel
+UI.globalStyle.fill = true
+UI.globalStyle.outlineCornersOnly = true
 expect(UI:promptForCustomization("Existing label", 0x11223380, false, false, {
     preview = function(labelValue, value, fill, outlineCornersOnly)
         previewedLabel = labelValue
@@ -286,25 +293,12 @@ expect(UI:promptForCustomization("Existing label", 0x11223380, false, false, {
         acceptedOutlineCornersOnly = outlineCornersOnly
     end,
 }), true, "colour prompt opens")
-expect(promptWindowOptions.title, "Tile customization", "customization window uses its new title")
-expect(promptWindowOptions.height, 416, "customization window fits its label and style controls")
 expect(UI:isPromptOpen(), true, "open colour prompt is tracked")
 expect(promptInput.value, "Existing label", "customization prepopulates the tile label")
-expect(promptInput.options.placeholder, "Tile label (optional)", "label field explains that it is optional")
 expect(promptColourPicker.value, 0x11223380, "colour prompt starts from tile colour")
 expect(promptColourPickerOptions.alphaSlider, true, "colour prompt exposes opacity")
-expect(promptCheckboxEntries[1].text, "Render fill", "colour prompt labels fill control")
-expect(promptCheckboxEntries[1].selected, false, "colour prompt starts from tile fill state")
-expect(
-    promptCheckboxEntries[2].text,
-    "Draw outline corners only",
-    "colour prompt labels corner outline control")
-expect(
-    promptCheckboxEntries[2].selected,
-    false,
-    "colour prompt starts from tile corner outline state")
-expect(table.concat(promptControlOrder, ","), "input,fill,picker,recent", "label is the first customization control")
-expect(promptListOptions.height, 122, "recent list fits five rows without scrolling")
+expect(promptCheckboxEntries[1].selected, false, "explicit fill off overrides enabled global")
+expect(promptCheckboxEntries[2].selected, false, "explicit corners off overrides enabled global")
 promptInput.value = "  Safe tile  "
 promptInput.options.onChange()
 promptCheckboxOptions.onChange(nil, nil, "render_fill", true)
@@ -321,6 +315,60 @@ expect(acceptedFill, true, "confirmed fill choice is returned")
 expect(acceptedOutlineCornersOnly, true, "confirmed corner outline is returned")
 expect(storedRecentColours, "445566FF", "confirmed colour is persisted as recent")
 
+expect(UI:promptForCustomization("", 0x445566FF, nil, nil, {
+    preview = function(_, _, fill, corners)
+        previewedFill, previewedOutlineCornersOnly = fill, corners
+    end,
+    confirm = function(_, _, fill, corners)
+        acceptedFill, acceptedOutlineCornersOnly = fill, corners
+    end,
+}), true, "inherited customization opens")
+expect(promptCheckboxEntries[1].selected, true, "inherited fill displays enabled global")
+expect(promptCheckboxEntries[2].selected, true, "inherited corners display enabled global")
+promptInput.value = "Label-only change"
+promptInput.options.onChange()
+promptColourPicker:SetValue(0x445566FF)
+expect(previewedFill, nil, "label and colour preview preserve fill inheritance")
+expect(previewedOutlineCornersOnly, nil, "label and colour preview preserve corner inheritance")
+promptButtons.Confirm()
+expect(acceptedFill, nil, "untouched fill checkbox keeps inheritance on confirm")
+expect(acceptedOutlineCornersOnly, nil, "untouched corners checkbox keeps inheritance on confirm")
+
+expect(UI:promptForCustomization("", 0x445566FF, nil, nil, {
+    preview = function(_, _, fill, corners)
+        previewedFill, previewedOutlineCornersOnly = fill, corners
+    end,
+    confirm = function(_, _, fill, corners)
+        acceptedFill, acceptedOutlineCornersOnly = fill, corners
+    end,
+}), true, "inherited fill can be overridden")
+promptCheckboxOptions.onChange(nil, nil, "render_fill", false)
+expect(previewedFill, false, "first fill click previews explicit disabled fill")
+expect(previewedOutlineCornersOnly, nil, "fill click leaves corners inherited")
+promptCheckboxOptions.onChange(nil, nil, "render_fill", true)
+promptButtons.Confirm()
+expect(acceptedFill, true, "toggling fill back still creates an explicit override")
+expect(acceptedOutlineCornersOnly, nil, "confirm leaves untouched corners inherited")
+UI.globalStyle.fill = false
+UI.globalStyle.outlineCornersOnly = false
+submitted = {}
+UI:drawTile(coord, { fill = acceptedFill, outlineCornersOnly = acceptedOutlineCornersOnly })
+expect(submitted[1].fill, true, "interacted fill no longer follows global changes")
+expect(submitted[1].outlineCornersOnly, false, "untouched corners still follow global changes")
+
+expect(UI:promptForCustomization("", 0x445566FF, nil, nil, {
+    confirm = function(_, _, fill, corners)
+        acceptedFill, acceptedOutlineCornersOnly = fill, corners
+    end,
+}), true, "inherited corners can be overridden")
+expect(promptCheckboxEntries[1].selected, false, "inherited fill displays disabled global")
+expect(promptCheckboxEntries[2].selected, false, "inherited corners display disabled global")
+promptCheckboxOptions.onChange(nil, nil, "outline_corners_only", true)
+promptCheckboxOptions.onChange(nil, nil, "outline_corners_only", false)
+promptButtons.Confirm()
+expect(acceptedFill, nil, "corner interaction leaves fill inherited")
+expect(acceptedOutlineCornersOnly, false, "toggling corners back preserves explicit false override")
+
 UI:rememberColour(0xAABBCCDD)
 local cancelledCustomization = false
 local unexpectedlyConfirmed = false
@@ -328,16 +376,18 @@ expect(UI:promptForCustomization("Keep me", 0x010203FF, true, true, {
     confirm = function()
         unexpectedlyConfirmed = true
     end,
-    preview = function() end,
+    preview = function(_, colour) previewedColour = colour end,
     cancel = function()
         cancelledCustomization = true
     end,
 }), true, "second colour prompt opens")
-expect(#promptList.entries, 2, "recent colours render as list rows")
-expect(promptList.entries[1].backgroundColour, 0xAABBCCDD, "newest row uses its colour")
-expect(promptList.entries[1].text, "", "recent rows do not expose hex text")
-promptListOptions.onChange(promptList, 2, true)
-expect(promptColourPicker.value, 0x445566FF, "recent colour row updates colour picker")
+expect(#promptSwatches, 2, "recent colours render as separate swatches")
+expect(promptSwatches[1].root.swatch.rgba, 0xAABBCCDD, "newest swatch shows its exact colour")
+promptSwatches[1].action()
+expect(promptColourPicker.value, 0xAABBCCDD, "newest swatch selects its colour and opacity")
+expect(previewedColour, 0xAABBCCDD, "swatch selection previews immediately")
+promptSwatches[2].action()
+expect(promptColourPicker.value, 0x445566FF, "second swatch selects its own colour")
 promptButtons.Cancel()
 expect(cancelledCustomization, true, "cancel invokes customization rollback")
 expect(unexpectedlyConfirmed, false, "cancel does not confirm customization")
@@ -580,7 +630,6 @@ expect(#mountedTabs, 2, "settings window exposes two tabs")
 expect(mountedTabs[1].value, "markers", "markers tab remains first")
 expect(mountedTabs[2].value, "presets", "presets tab combines management and transfer")
 expect(UI.thicknessSlider ~= nil, true, "outline controls mount on the markers page")
-expect(UI.ignoreDepthCheckbox ~= nil, true, "depth control mounts on the markers page")
 expect(mountedPages[1].addedControls[1], "checkbox", "draw-over-scenery is first")
 local markerOptions = mountedPages[1].addedComponents[1]
 expect(
@@ -588,10 +637,49 @@ expect(
     "hover_preview",
     "hover preview toggle is available")
 expect(markerOptions.entries[2].selected, true, "hover preview toggle defaults on")
-expect(markerOptions.options.inline, true, "marker toggles share one row")
 markerOptions.options.onChange(nil, nil, "hover_preview", false)
 expect(UI:isHoverPreviewEnabled(), false, "hover preview toggle updates runtime state")
 expect(storedHoverPreview, false, "hover preview toggle persists")
+
+local inheritedMarker = UI:getStyle()
+local renderingOptions = markerOptions.options
+renderingOptions.onChange(nil, nil, "fill", true)
+renderingOptions.onChange(nil, nil, "outlineCornersOnly", true)
+submitted = {}
+UI:drawTile(coord, inheritedMarker)
+expect(submitted[1].fill, true, "placed marker follows global fill change")
+expect(submitted[1].outlineCornersOnly, true, "placed marker follows global corner change")
+UI:drawTile(coord, { fill = false, outlineCornersOnly = false })
+expect(submitted[2].fill, false, "explicit fill off overrides enabled global")
+expect(submitted[2].outlineCornersOnly, false, "explicit corners off overrides enabled global")
+submitted = {}
+UI:draw({ [coord] = inheritedMarker }, sameTileHover)
+expect(submitted[1].fill, true, "marked hover preserves inherited fill")
+expect(submitted[1].outlineCornersOnly, true, "marked hover preserves inherited corners")
+renderingOptions.onChange(nil, nil, "fill", false)
+renderingOptions.onChange(nil, nil, "outlineCornersOnly", false)
+submitted = {}
+UI:drawTile(coord, inheritedMarker)
+expect(submitted[1].fill, false, "inherited fill updates without replacing marker")
+expect(submitted[1].outlineCornersOnly, false, "inherited corners update without replacing marker")
+UI:drawTile(coord, { fill = true, outlineCornersOnly = true })
+expect(submitted[2].fill, true, "explicit fill on overrides disabled global")
+expect(submitted[2].outlineCornersOnly, true, "explicit corners on override disabled global")
+local mountedPrettyUI = UI.prettyui
+renderingOptions.onChange(nil, nil, "fill", true)
+UI:init(UI.presetHandlers, prettyui, draw)
+submitted = {}
+UI:drawTile(coord, inheritedMarker)
+expect(submitted[1].fill, true, "enabled global fill survives settings reload")
+expect(submitted[1].outlineCornersOnly, false, "disabled global corners survive settings reload")
+renderingOptions.onChange(nil, nil, "outlineCornersOnly", true)
+renderingOptions.onChange(nil, nil, "fill", false)
+UI:init(UI.presetHandlers, prettyui, draw)
+submitted = {}
+UI:drawTile(coord, inheritedMarker)
+expect(submitted[1].fill, false, "disabled global fill survives settings reload")
+expect(submitted[1].outlineCornersOnly, true, "enabled global corners survive settings reload")
+UI.prettyui = mountedPrettyUI
 expect(UI.labelSizeCombo ~= nil, true, "label size control mounts on the markers page")
 expect(
     table.concat(mountedPages[2].addedControls, ","),

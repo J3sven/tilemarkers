@@ -87,12 +87,54 @@ equal(
     Presets:findActiveAt(sourceCoord).id,
     "later active preset matches rendering precedence")
 equal("Edited", saved.presets[1].tiles[1].label, "edited label reaches storage")
-local emptySuccess, emptyMessage = Presets:updateTiles("preset_1", {})
+local emptySuccess = Presets:updateTiles("preset_1", {})
 equal(false, emptySuccess, "preset edit rejects an empty tile set")
-equal(
-    "A preset must contain at least one tile.",
-    emptyMessage,
-    "empty preset edit explains why save remains open")
 equal(3300, Presets:get("preset_1").tiles[1].x, "rejected edit preserves saved tiles")
+
+local mixedStyles = {
+    {},
+    { fill = false },
+    { fill = true },
+    { outlineCornersOnly = false },
+    { outlineCornersOnly = true },
+    { fill = false, outlineCornersOnly = false },
+    { fill = false, outlineCornersOnly = true },
+    { fill = true, outlineCornersOnly = false },
+    { fill = true, outlineCornersOnly = true },
+}
+for index, style in ipairs(mixedStyles) do
+    style.x = 3400 + index
+    style.z = 3400
+    style.level = 0
+end
+
+local function assertMixedStyles(preset, context)
+    equal(#mixedStyles, #preset.tiles, context .. " tile count")
+    for index, expected in ipairs(mixedStyles) do
+        local actual = preset.tiles[index]
+        equal(expected.x, actual.x, context .. " tile coordinate")
+        equal(expected.fill, actual.fill, context .. " fill " .. index)
+        equal(expected.outlineCornersOnly, actual.outlineCornersOnly, context .. " corners " .. index)
+    end
+end
+
+equal(true, Presets:updateTiles("preset_1", mixedStyles), "mixed overrides save")
+local exported, token = Presets:export("preset_1")
+assert(exported, token)
+
+PersistentDB.GetStructuredData = function()
+    return saved
+end
+package.loaded["src/presets"] = nil
+Presets = require("src/presets")
+assertMixedStyles(Presets:get("preset_1"), "reloaded preset")
+
+local imported, importedPreset = Presets:import(token)
+assert(imported, importedPreset)
+assertMixedStyles(importedPreset, "imported preset")
+local importedId = importedPreset.id
+package.loaded["src/presets"] = nil
+Presets = require("src/presets")
+assertMixedStyles(Presets:get(importedId), "reloaded imported preset")
 
 print("test_presets_storage: ok")

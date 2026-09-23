@@ -107,6 +107,7 @@ local function setTileMarked(store, source, marked)
         outlineColour = style.outlineColour,
         fillColour = style.fillColour,
         fill = style.fill,
+        outlineCornersOnly = style.outlineCornersOnly,
     })
     UI:rememberColour(style.outlineColour)
 end

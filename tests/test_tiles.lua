@@ -80,7 +80,6 @@ equal(nil, saved.levels[0][258][54321].text, "cleared label is removed from stor
 equal(true, Tiles:setLabel(added, "Safe tile"), "label can be restored")
 equal(0x12345678, Tiles:getColour(added), "stored outline is exposed as tile colour")
 equal(false, Tiles:getFill(added), "stored fill state is exposed")
-equal(false, Tiles:getOutlineCornersOnly(added), "stored outline defaults continuous")
 equal(
     true,
     Tiles:setColour(added, 0x12345678, true, true),
@@ -155,6 +154,56 @@ local visibleExport = Tiles:exportCoords({ added, added })
 equal(1, #visibleExport, "coordinate export deduplicates visible markers")
 equal(added.level, visibleExport[1].level, "coordinate export keeps visible level")
 equal(0x12345678, visibleExport[1].outlineColour, "coordinate export keeps marker style")
+
+Tiles:add(added, { outlineColour = 0x12345678 })
+equal(nil, Tiles:getFill(added), "new marker inherits fill")
+equal(nil, Tiles:getOutlineCornersOnly(added), "new marker inherits corners")
+Tiles:previewCustomization(added, "", 0x12345678, false, true)
+equal(false, Tiles:getFill(added), "preview can override inherited fill with false")
+equal(true, Tiles:getOutlineCornersOnly(added), "preview can override inherited corners")
+local inheritedExport = Tiles:exportCoords({ added })[1]
+equal(nil, inheritedExport.fill, "export ignores transient fill override")
+equal(nil, inheritedExport.outlineCornersOnly, "export ignores transient corner override")
+Tiles:cancelCustomizationPreview(added)
+equal(nil, Tiles:getFill(added), "cancel restores inherited fill")
+equal(nil, Tiles:getOutlineCornersOnly(added), "cancel restores inherited corners")
+
+Tiles:setCustomization(added, "", 0x12345678, true, false)
+Tiles:previewCustomization(added, "", 0x12345678, nil, nil)
+queried = Tiles:query(added, 0, { { source = added, target = target } })
+equal(nil, queried[target].fill, "reset preview renders inherited fill")
+equal(nil, queried[target].outlineCornersOnly, "reset preview renders inherited corners")
+Tiles:cancelCustomizationPreview(added)
+equal(true, Tiles:getFill(added), "cancelled reset restores true fill override")
+equal(false, Tiles:getOutlineCornersOnly(added), "cancelled reset restores false corner override")
+
+local function reloadTiles()
+    reloadedStorage = saved
+    package.loaded["src/tiles"] = nil
+    Tiles = require("src/tiles")
+end
+
+Tiles:previewCustomization(added, "", 0x12345678, nil, false)
+Tiles:setCustomization(added, "", 0x12345678, nil, false)
+reloadTiles()
+equal(nil, Tiles:getFill(added), "fill reset survives reload")
+equal(false, Tiles:getOutlineCornersOnly(added), "independent false corner override survives reload")
+local resetExport = Tiles:exportCoords({ added })[1]
+equal(nil, resetExport.fill, "export preserves fill inheritance")
+equal(false, resetExport.outlineCornersOnly, "export preserves explicit continuous outline")
+
+Tiles:setCustomization(added, "", 0x12345678, false, nil)
+reloadTiles()
+equal(false, Tiles:getFill(added), "independent false fill override survives reload")
+equal(nil, Tiles:getOutlineCornersOnly(added), "corner reset survives reload")
+resetExport = Tiles:exportCoords({ added })[1]
+equal(false, resetExport.fill, "export preserves explicit disabled fill")
+equal(nil, resetExport.outlineCornersOnly, "export preserves corner inheritance")
+
+Tiles:setColour(added, 0x12345678, nil, nil)
+reloadTiles()
+equal(nil, Tiles:getFill(added), "recolour preserves inherited fill after reload")
+equal(nil, Tiles:getOutlineCornersOnly(added), "recolour preserves inherited corners after reload")
 
 local removed, removedCount = Tiles:removeAll({ added })
 equal(true, removed, "visible tile batch is saved")
