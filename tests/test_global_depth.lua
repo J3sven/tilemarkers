@@ -1,4 +1,5 @@
 package.path = "./?.lua;" .. package.path
+log = print
 
 local function expect(actual, expected, message)
     if actual ~= expected then
@@ -41,12 +42,21 @@ id = {
         MUSEO_SANS_19PT_REGULAR = "font_19",
         MUSEO_SANS_11PT_REGULAR = "font_11",
     },
+    Sprite = {
+        RS3_ICON_ACCORDION_0 = 30205,
+        RS3_ICON_ACCORDION_1 = 30206,
+        RS3_ICON_ACCORDION_2 = 30207,
+        RS3_ICON_ACCORDION_3 = 30208,
+        RS3_ICON_ACCORDION_4 = 30209,
+        RS3_ICON_ACCORDION_5 = 30210,
+    },
 }
 ScreenConvert = {
     CoordFineToScreen = function() return { x = 100, y = 100 } end,
 }
 
 ui = {
+    Hook = { ONRESIZE = 1, ONMOUSEOVER = 2, ONMOUSELEAVE = 3, ONCLICK = 4 },
     AlignMode = {
         CENTRE = 1,
     },
@@ -77,12 +87,38 @@ local promptColourPickerOptions
 local promptSwatches
 local promptCheckboxEntries
 local promptCheckboxOptions
-local prettyui = {
-    RibbonBar = {
-        Register = function()
-            return { SetActive = function() end }
-        end,
+local settingsCallbacks = {}
+local contentCallbacks = {}
+local drawCallbacks = {}
+local function runDrawFrame()
+    local callbacks = {}
+    for _, callback in pairs(drawCallbacks) do
+        callbacks[#callbacks + 1] = callback
+    end
+    for _, callback in ipairs(callbacks) do callback() end
+end
+
+local function presentContent(parent)
+    contentCallbacks.tilemarkers_content({ component = parent })
+    -- Native presentation clears child components after dispatching the event.
+    parent.children = {}
+    runDrawFrame()
+end
+Event = {
+    SettingsLayerReady = {
+        Subscribe = function(id, callback) settingsCallbacks[id] = callback end,
+        Unsubscribe = function(id) settingsCallbacks[id] = nil end,
     },
+    ContentLayerReady = {
+        Subscribe = function(id, callback) contentCallbacks[id] = callback end,
+        Unsubscribe = function(id) contentCallbacks[id] = nil end,
+    },
+    Draw = {
+        Subscribe = function(id, callback) drawCallbacks[id] = callback end,
+        Unsubscribe = function(id) drawCallbacks[id] = nil end,
+    },
+}
+local prettyui = {
     Window = {
         new = function(_, options)
             promptWindowOptions = options
@@ -501,21 +537,20 @@ expect(
 expect(promptInput.value, "TM2export", "export popup exposes the preset token")
 promptButtons.Close()
 
-local mountedTabs
-local mountedPages = {}
 local editOverlay
-local editOverlayOptions
 local makeControl
 makeControl = function()
     local control = {
         content = { content = "" },
         addedControls = {},
+        subscriptions = {},
         addedComponents = {},
     }
     control.root = control
 
-    local function addControl(self)
+    local function addControl(self, options)
         local child = makeControl()
+        child.options = options
         self.addedComponents[#self.addedComponents + 1] = child
         return child
     end
@@ -541,10 +576,17 @@ makeControl = function()
         self.addedControls[#self.addedControls + 1] = "panel"
         local child = addControl(self)
         child.options = options
+        child.height = options.height
         return child
     end
     control.AddSimpleButton = addControl
     control.AddSlider = addControl
+    control.AddSprite = function(self, sprite, options)
+        local child = addControl(self, options)
+        child.sprite = sprite
+        return child
+    end
+    control.SetSprite = function(self, sprite) self.sprite = sprite end
     control.AddSpriteButton = function(self, sprite, action, options)
         self.addedControls[#self.addedControls + 1] = "sprite:" .. sprite
         local child = addControl(self)
@@ -553,10 +595,6 @@ makeControl = function()
         child.options = options
         return child
     end
-    control.AddTabs = function(_, entries)
-        mountedTabs = entries
-        return makeControl()
-    end
     control.AddText = function(self, options)
         self.addedControls[#self.addedControls + 1] = "text"
         local child = addControl(self)
@@ -564,13 +602,8 @@ makeControl = function()
         return child
     end
     control.AddTextField = addControl
-    control.GetPage = function(_, index)
-        mountedPages[index] = mountedPages[index] or makeControl()
-        return mountedPages[index]
-    end
     control.Close = function() end
     control.Select = function() end
-    control.SetActive = function() end
     control.SetDisabled = function() end
     control.SetEntries = function() end
     control.SetSelected = function() end
@@ -585,6 +618,10 @@ makeControl = function()
     end
     control.Destroy = function(self) self.destroyed = true end
     control.MoveToFront = function(self) self.movedToFront = true end
+    control.Subscribe = function(self, hook, callback) self.subscriptions[hook] = callback end
+    control.SetSize = function(self, width, height)
+        self.width, self.height = width, height
+    end
     control.RefreshRowBackgrounds = function(self)
         self.rowBackgroundsRefreshed = true
     end
@@ -592,24 +629,31 @@ makeControl = function()
 end
 
 UI.prettyui = {
-    Window = {
-        new = function()
-            return makeControl()
+    SimpleView = {
+        new = function(parent)
+            local view = makeControl()
+            view.contentWidth = parent.width
+            function view:Refresh()
+                self.contentWidth = parent.width
+            end
+            parent.children = parent.children or {}
+            parent.children[#parent.children + 1] = view.root
+            return view
         end,
     },
     Panel = {
-        new = function(_, options)
-            editOverlayOptions = options
+        new = function()
             editOverlay = makeControl()
             return editOverlay
         end,
     },
 }
 local mountedPreset = { id = "preset_1", name = "My preset" }
+local mountedPresetActive = true
 UI.presetHandlers = {
     list = function() return { mountedPreset } end,
-    isActive = function() return true end,
-    setActive = function() return true end,
+    isActive = function() return mountedPresetActive end,
+    setActive = function(_, value) mountedPresetActive = value; return true end,
     delete = function() return true end,
     export = function() return true, "TM2token" end,
     rename = function() return true end,
@@ -624,19 +668,15 @@ UI.presetHandlers = {
     cancelEdit = function() return true end,
 }
 UI.gameArea = { width = 800, height = 600 }
-UI:buildWindow()
-expect(UI.window ~= nil, true, "settings window mounts")
-expect(#mountedTabs, 2, "settings window exposes two tabs")
-expect(mountedTabs[1].value, "markers", "markers tab remains first")
-expect(mountedTabs[2].value, "presets", "presets tab combines management and transfer")
-expect(UI.thicknessSlider ~= nil, true, "outline controls mount on the markers page")
-expect(mountedPages[1].addedControls[1], "checkbox", "draw-over-scenery is first")
-local markerOptions = mountedPages[1].addedComponents[1]
-expect(
-    markerOptions.entries[2].value,
-    "hover_preview",
-    "hover preview toggle is available")
-expect(markerOptions.entries[2].selected, true, "hover preview toggle defaults on")
+local contentParent = { width = 640, height = 480 }
+presentContent(contentParent)
+expect(contentParent.children[1], UI.contentView.root,
+    "preset content survives the native post-event clear")
+local initialContent = UI.contentView
+expect(UI.settingsView, nil, "presets can open before marker settings")
+settingsCallbacks.tilemarkers_settings({ component = { width = 640, height = 480 } })
+expect(UI.contentView, initialContent, "opening settings leaves preset content mounted")
+local markerOptions = UI.settingsView.addedComponents[1]
 markerOptions.options.onChange(nil, nil, "hover_preview", false)
 expect(UI:isHoverPreviewEnabled(), false, "hover preview toggle updates runtime state")
 expect(storedHoverPreview, false, "hover preview toggle persists")
@@ -680,68 +720,90 @@ UI:drawTile(coord, inheritedMarker)
 expect(submitted[1].fill, false, "disabled global fill survives settings reload")
 expect(submitted[1].outlineCornersOnly, true, "enabled global corners survive settings reload")
 UI.prettyui = mountedPrettyUI
-expect(UI.labelSizeCombo ~= nil, true, "label size control mounts on the markers page")
+local function presetControl(sprite)
+    for _, control in ipairs(UI.presetPanelsByID.preset_1.addedComponents) do
+        if control.sprite == sprite then return control end
+    end
+end
+UI.contentView.scrollY = 120
+presetControl("EYE").action()
 expect(
-    table.concat(mountedPages[2].addedControls, ","),
-    "text,sprite:PLUS,sprite:IMPORT,panel",
-    "preset tab starts with add/import controls and a preset panel")
-local mountedPresetPanel = mountedPages[2].addedComponents[4]
-expect(
-    table.concat(mountedPresetPanel.addedControls, ","),
-    "sprite:PENCIL,text,sprite:EYE,sprite:SETTINGS,sprite:EXPORT,sprite:TRASH",
-    "rename precedes the title and remaining actions stay below")
-expect(mountedPresetPanel.options.height, 96, "preset panel fits both styled rows")
-expect(mountedPresetPanel.options.layout.startY, 10, "title row is vertically centred")
-expect(mountedPresetPanel.options.layout.paddingBottom, 0, "panel layout uses full height")
-expect(
-    mountedPresetPanel.addedComponents[2].options.inline,
-    true,
-    "preset title follows rename on the same row")
-expect(
-    mountedPresetPanel.addedComponents[3].options.marginTop,
-    12,
-    "action icons are vertically centred in lower row")
-expect(
-    mountedPresetPanel.addedComponents[3].options.x,
-    202,
-    "bottom action icons align to the right")
-expect(
-    mountedPresetPanel.addedComponents[4].options.tooltip,
-    "Edit preset tiles",
-    "preset settings action explains tile editing")
-expect(
-    mountedPresetPanel.options.rowBackgroundColours[1],
-    0x24211EFF,
-    "preset title row uses settings backdrop")
-expect(
-    mountedPresetPanel.options.rowBackgroundColours[2],
-    0x2E2825FF,
-    "preset button row uses alternate backdrop")
-expect(
-    mountedPresetPanel.options.rowBackgroundEdgeToEdge,
-    true,
-    "preset row backdrops retain edge-to-edge styling")
-expect(mountedPresetPanel.rowBackgroundsRefreshed, true, "preset row backdrops refresh")
-mountedPages[2].scrollY = 120
-mountedPresetPanel.addedComponents[3].action()
-expect(
-    mountedPages[2].restoredScrollY,
+    UI.contentView.restoredScrollY,
     120,
     "preset toggle restores the previous scroll position")
 UI:rebuildPresetPanels("preset_1")
 expect(
-    mountedPages[2].scrolledToChild,
+    UI.contentView.scrolledToChild,
     UI.presetPanelsByID.preset_1,
     "new preset focus scrolls its panel into view")
 
-mountedPresetPanel.addedComponents[4].action()
+for _, sprite in ipairs({ "PENCIL", "SETTINGS", "EXPORT", "TRASH" }) do
+    expect(presetControl(sprite), nil, "preset actions start collapsed: " .. sprite)
+end
+local chevron = presetControl(id.Sprite.RS3_ICON_ACCORDION_0)
+chevron.subscriptions[ui.Hook.ONMOUSEOVER]()
+expect(chevron.sprite, id.Sprite.RS3_ICON_ACCORDION_1, "hover highlights the preset chevron")
+chevron.subscriptions[ui.Hook.ONMOUSELEAVE]()
+expect(chevron.sprite, id.Sprite.RS3_ICON_ACCORDION_0, "leaving restores the preset chevron")
+chevron.subscriptions[ui.Hook.ONCLICK]()
+local expandedPresetHeight = UI.presetPanelsByID.preset_1.height
+presetControl(id.Sprite.RS3_ICON_ACCORDION_3).subscriptions[ui.Hook.ONCLICK]()
+local collapsedPresetHeight = UI.presetPanelsByID.preset_1.height
+expect(collapsedPresetHeight < expandedPresetHeight, true, "collapse removes the action row height")
+for _, sprite in ipairs({ "PENCIL", "SETTINGS", "EXPORT", "TRASH" }) do
+    expect(presetControl(sprite), nil, "collapsed actions cannot receive clicks: " .. sprite)
+end
+presetControl("HIDE").action()
+expect(mountedPresetActive, true, "a collapsed preset can still be enabled")
+expect(UI.presetPanelsByID.preset_1.height, collapsedPresetHeight,
+    "activation does not expand the preset")
+presentContent({ width = 480, height = 240 })
+expect(UI.presetPanelsByID.preset_1.height, collapsedPresetHeight,
+    "reopening content preserves the preset collapse state")
+presetControl(id.Sprite.RS3_ICON_ACCORDION_0).subscriptions[ui.Hook.ONCLICK]()
+expect(UI.presetPanelsByID.preset_1.height, expandedPresetHeight, "expansion restores the action row")
+for _, sprite in ipairs({ "PENCIL", "SETTINGS", "EXPORT", "TRASH" }) do
+    expect(presetControl(sprite) ~= nil, true, "expanded actions become available: " .. sprite)
+end
+presentContent({ width = 480, height = 240 })
+expect(UI.presetPanelsByID.preset_1.height, expandedPresetHeight,
+    "reopening content preserves an explicitly expanded preset")
+
+local responsiveParent = { width = 640, height = 240 }
+presentContent(responsiveParent)
+UI.contentView.scrollY = 50
+local wideView = UI.contentView
+local wideCardHeight = UI.presetPanelsByID.preset_1.height
+responsiveParent.width = 180
+wideView.subscriptions[ui.Hook.ONRESIZE]()
+expect(wideView.destroyed, true, "crossing into compact layout releases the old view")
+expect(UI.contentView.scrollY, 50, "compact transition preserves the scroll position")
+expect(mountedPresetActive, true, "compact transition preserves preset activation")
+expect(UI.collapsedPresets.preset_1, false, "compact transition preserves expansion")
+expect(UI.presetPanelsByID.preset_1.height < wideCardHeight, true,
+    "compact cards reclaim vertical space")
+for _, sprite in ipairs({ "PENCIL", "SETTINGS", "EXPORT", "TRASH" }) do
+    expect(presetControl(sprite) ~= nil, true, "compact actions remain available: " .. sprite)
+end
+local compactView = UI.contentView
+responsiveParent.width = 200
+compactView.subscriptions[ui.Hook.ONRESIZE]()
+expect(UI.contentView, compactView, "resizing within compact mode does not recreate controls")
+presetControl(id.Sprite.RS3_ICON_ACCORDION_3).subscriptions[ui.Hook.ONCLICK]()
+presetControl("EYE").action()
+expect(mountedPresetActive, false, "compact eye control toggles the preset")
+responsiveParent.width = 640
+compactView.subscriptions[ui.Hook.ONRESIZE]()
+expect(compactView.destroyed, true, "expanding beyond compact mode releases the old view")
+expect(UI.collapsedPresets.preset_1, true, "wide transition preserves collapse")
+expect(mountedPresetActive, false, "wide transition preserves the disabled preset")
+expect(presetControl("PENCIL"), nil, "wide transition does not expose collapsed actions")
+presetControl(id.Sprite.RS3_ICON_ACCORDION_0).subscriptions[ui.Hook.ONCLICK]()
+expect(UI.presetPanelsByID.preset_1.height, wideCardHeight,
+    "expanding restores normal card spacing in a wide panel")
+
+presetControl("SETTINGS").action()
 expect(editOverlay ~= nil, true, "edit action mounts a PrettyUI panel overlay")
-expect(editOverlayOptions.backgroundAlpha, 0.78, "edit overlay is semitransparent")
-expect(editOverlay.root.movedToFront, true, "edit overlay is raised above game UI")
-expect(
-    table.concat(editOverlay.addedControls, ","),
-    "text,text,button:Save,button:Cancel",
-    "edit overlay clearly presents its status and actions")
 editOverlay.addedComponents[4].action()
 expect(editOverlay.destroyed, true, "cancel destroys the edit overlay")
 expect(UI.presetEditOverlay, nil, "cancel exits UI edit mode")
@@ -749,7 +811,7 @@ expect(UI.presetEditOverlay, nil, "cancel exits UI edit mode")
 UI.presetHandlers.saveEdit = function()
     return false, "A preset must contain at least one tile."
 end
-UI.presetPanelsByID.preset_1.addedComponents[4].action()
+presetControl("SETTINGS").action()
 local failedSaveOverlay = editOverlay
 failedSaveOverlay.addedComponents[3].action()
 expect(
@@ -760,6 +822,25 @@ expect(
     failedSaveOverlay.addedComponents[2].content,
     "A preset must contain at least one tile.",
     "failed save explains the problem in the overlay")
+local previousSettings = UI.settingsView
+local previousCanvas = UI.canvas
+local previousContent = UI.contentView
+settingsCallbacks.tilemarkers_settings({ component = { width = 640, height = 480 } })
+expect(previousSettings.destroyed, true, "reopening settings releases the previous view")
+expect(UI.contentView, previousContent, "reopening settings keeps preset content")
+expect(previousContent.destroyed, nil, "settings remount does not destroy preset content")
+local remountedOptions = UI.settingsView.addedComponents[1].entries
+expect(remountedOptions[3].selected, false, "reopening settings preserves fill changes")
+expect(remountedOptions[4].selected, true, "reopening settings preserves corner changes")
+expect(UI.canvas, previousCanvas, "reopening settings keeps the marker canvas")
+expect(UI.presetEditOverlay, failedSaveOverlay, "reopening settings keeps active preset editing")
+local remountedSettings = UI.settingsView
+presentContent({ width = 480, height = 240 })
+expect(previousContent.destroyed, true, "reopening content releases the previous view")
+expect(UI.settingsView, remountedSettings, "reopening content keeps marker settings")
+expect(remountedSettings.destroyed, nil, "content remount does not destroy marker settings")
+expect(UI.canvas, previousCanvas, "reopening content keeps the marker canvas")
+expect(UI.presetEditOverlay, failedSaveOverlay, "reopening content keeps active preset editing")
 failedSaveOverlay.addedComponents[4].action()
 
 
@@ -790,5 +871,50 @@ expect(destroyedPrompts.export, true, "missing rename prompt does not skip expor
 expect(destroyedPrompts.delete, true, "all retained prompts are cleaned up")
 expect(UI.gameArea, nil, "logout forgets the old game area")
 expect(UI.canvas, nil, "logout discards the dead native canvas")
+
+local retainedSettings = UI.settingsView
+local retainedContent = UI.contentView
+expect(UI:ensureMounted(), false, "world rendering waits for the game area")
+expect(UI.settingsView, retainedSettings, "missing game area leaves native settings intact")
+expect(UI.contentView, retainedContent, "missing game area leaves native content intact")
+expect(UI:startPresetEdit("preset_1", "My preset"), false, "tile editing requires the game area")
+UI:shutdown()
+expect(retainedSettings.destroyed, true, "shutdown destroys native settings")
+expect(UI.settingsView, nil, "shutdown forgets the settings view")
+expect(retainedContent.destroyed, true, "shutdown destroys native content")
+expect(UI.contentView, nil, "shutdown forgets the content view")
+expect(next(settingsCallbacks), nil, "shutdown unsubscribes settings mounting")
+expect(next(contentCallbacks), nil, "shutdown unsubscribes content mounting")
+expect(next(drawCallbacks), nil, "shutdown leaves no pending content mount")
+
+-- Only the latest presentation may mount when several arrive before a draw.
+UI:init(UI.presetHandlers, mountedPrettyUI, draw)
+local abandonedParent = { width = 640, height = 480 }
+local latestParent = { width = 480, height = 240 }
+contentCallbacks.tilemarkers_content({ component = abandonedParent })
+abandonedParent.children = {}
+contentCallbacks.tilemarkers_content({ component = latestParent })
+latestParent.children = {}
+runDrawFrame()
+expect(abandonedParent.children[1], nil, "superseded content layer stays empty")
+expect(latestParent.children[1], UI.contentView.root, "latest content layer receives presets")
+local mountedContent = UI.contentView
+runDrawFrame()
+expect(UI.contentView, mountedContent, "later draws do not rebuild preset content")
+
+-- Logout and shutdown must cancel a presentation before its first draw.
+local cancelledParent = { width = 640, height = 480 }
+contentCallbacks.tilemarkers_content({ component = cancelledParent })
+cancelledParent.children = {}
+UI:destroyContent()
+runDrawFrame()
+expect(cancelledParent.children[1], nil, "content teardown cancels a pending mount")
+expect(UI.contentView, nil, "content teardown does not resurrect a view")
+contentCallbacks.tilemarkers_content({ component = cancelledParent })
+cancelledParent.children = {}
+UI:shutdown()
+runDrawFrame()
+expect(cancelledParent.children[1], nil, "shutdown cancels a pending mount")
+expect(UI.contentView, nil, "shutdown does not resurrect a view")
 
 print("test_global_config: ok")

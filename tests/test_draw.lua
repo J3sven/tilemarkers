@@ -30,7 +30,7 @@ local function managedShape()
 end
 
 ShapeList = {
-    CreateEntity = function(name)
+    CreateInstance = function(name)
         local shape = managedShape()
         shape.name = name
         submitted[#submitted + 1] = shape
@@ -80,7 +80,6 @@ expect(#submitted[1].shapeData.tris, 6, "fill has two triangles")
 expect(submitted[1].shapeData.positions[1].x, -256, "mesh starts at local tile edge")
 expect(submitted[1].lineWidth, 3.5, "outline thickness reaches shape")
 expect(submitted[1].ignoreDepth, true, "depth setting reaches shape")
-expect(submitted[1].coordGrid, westCoord, "shape anchors to tile coord")
 
 Draw.Tile{
     coordGrid = westCoord,

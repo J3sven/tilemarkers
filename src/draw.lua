@@ -42,7 +42,7 @@ local function setShape(key, signature, shapeData, properties)
     if entry == nil then
         serial = serial + 1
         entry = {
-            shape = ShapeList.CreateEntity(string.format(
+            shape = ShapeList.CreateInstance(string.format(
                 "tilemarkers_tile_%d", serial)),
         }
         if entry.shape == nil then return false, "failed to create shape" end
@@ -61,7 +61,7 @@ local function setShape(key, signature, shapeData, properties)
     entry.shape.ignoreDepth = properties.ignoreDepth
     entry.shape.lineWidth = properties.lineWidth
     entry.shape.colour = 0xFFFFFFFF
-    entry.shape.coordGrid = properties.coordGrid
+    entry.shape.translation = properties.translation
     entry.lastSeen = frame
     return true
 end
@@ -97,6 +97,13 @@ local function tilePosition(centre)
     return minX, minZ, math.floor(minX / TILE_SIZE), math.floor(minZ / TILE_SIZE)
 end
 
+local function tileHeight(level, minX, minZ, x, z)
+    return World.GetGroundHeight(
+        level,
+        clamp(x, minX, minX + TILE_SIZE - 1),
+        clamp(z, minZ, minZ + TILE_SIZE - 1))
+end
+
 local function sidePosition(side, minX, minZ, inset, distance, level)
     local data = SIDES[side]
     local worldX = data.alongX
@@ -107,7 +114,7 @@ local function sidePosition(side, minX, minZ, inset, distance, level)
         or minZ + distance
     worldX = math.floor(worldX + data.inwardX * inset + 0.5)
     worldZ = math.floor(worldZ + data.inwardZ * inset + 0.5)
-    local height, available = World.GetGroundHeight(level, worldX, worldZ)
+    local height, available = tileHeight(level, minX, minZ, worldX, worldZ)
     if not available then return nil end
     return Vector3.new(
         worldX,
@@ -163,7 +170,7 @@ local function projectedInset(side, minX, minZ, level, lineWidth)
     local endZ = midpointZ + (data.alongX and 0.0 or OUTLINE_INSET_PROBE)
 
     local function projected(x, z)
-        local height, available = World.GetGroundHeight(level, x, z)
+        local height, available = tileHeight(level, minX, minZ, x, z)
         if not available then return nil end
         local success, screenPosition = pcall(function()
             return ScreenConvert.Vector3ToScreen(Vector3.new(
@@ -228,7 +235,7 @@ local function buildMainShape(
         for x = 0, 1 do
             local worldX = minX + x * TILE_SIZE
             local worldZ = minZ + z * TILE_SIZE
-            local height, available = World.GetGroundHeight(level, worldX, worldZ)
+            local height, available = tileHeight(level, minX, minZ, worldX, worldZ)
             if not available then return nil, "ground height is unavailable" end
             grid[#grid + 1] = Vector3.new(worldX, height + HEIGHT_OFFSET, worldZ)
         end
@@ -426,7 +433,7 @@ function Draw.Tile(settings)
 
     local key = tostring(settings.id or string.format(
         "fixed:%d:%d:%d", level, centre.x, centre.z))
-    local signature = table.concat({
+    local signatureParts = {
         level,
         tileX,
         tileZ,
@@ -434,9 +441,14 @@ function Draw.Tile(settings)
         fillRGBA or "none",
         cornersOnly and 1 or 0,
         splitSignature(splitSides),
-    }, ":")
+    }
+    -- Area reloads can change the terrain without changing the tile or style.
+    for _, position in ipairs(shape.positions) do
+        signatureParts[#signatureParts + 1] = position.y
+    end
+    local signature = table.concat(signatureParts, ":")
     local properties = {
-        coordGrid = coord,
+        translation = anchor,
         ignoreDepth = settings.ignoreDepth == true,
         lineWidth = lineWidth,
     }

@@ -1,9 +1,11 @@
 {
-  "name": "Tile Marker",
-  "version": "0.2.0",
-  "contactEmailAddress": "tilemarkers@nevs.me",
+  "name": "Tile Markers",
+  "version": "0.3.0",
+  "contactEmailAddress": "plugins@j3.gg",
+  "hasSettingsIcon": true,
+  "hasRibbonIcon": true,
   "requiredDependencies": {
-    "prettyui": "prettyui"
+    "prettyui": 6398181
   },
   "optionalDependencies": {}
 }

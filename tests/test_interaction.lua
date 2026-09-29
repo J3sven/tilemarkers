@@ -343,7 +343,8 @@ local UI = {
     rememberColour = function(_, colour)
         rememberedColour = colour
     end,
-    setPanelOpen = function() end,
+    destroySettings = function() end,
+    destroyContent = function() end,
     destroy = function() end,
     shutdown = function() end,
 }

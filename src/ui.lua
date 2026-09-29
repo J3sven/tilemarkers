@@ -3,6 +3,9 @@ local Draw = require("src/draw")
 
 local UI = {}
 
+local SETTINGS_EVENT_ID = "tilemarkers_settings"
+local CONTENT_EVENT_ID = "tilemarkers_content"
+
 local OUTLINE_COLOUR_STORAGE_KEY = "markerOutlineColour"
 local RECENT_COLOURS_STORAGE_KEY = "recentMarkerColours"
 local MAX_RECENT_COLOURS = 5
@@ -72,9 +75,37 @@ end
 
 
 
-local WINDOW_WIDTH = 416
-local WINDOW_HEIGHT = 482
 local CONTROL_GAP = 8
+local COMPACT_PRESET_WIDTH = 280
+local PRESET_LAYOUT = {
+    padding = 14,
+    startY = 14,
+    size = 24,
+    gap = 8,
+    cardStartY = 10,
+    actionMargin = 12,
+    collapsedHeight = 48,
+    expandedHeight = 96,
+    heading = "Tile Marker Presets",
+    headingHeight = 32,
+}
+local COMPACT_PRESET_LAYOUT = {
+    padding = 6,
+    startY = 8,
+    size = 20,
+    gap = 4,
+    cardStartY = 6,
+    actionMargin = 4,
+    collapsedHeight = 40,
+    expandedHeight = 72,
+    heading = "Presets",
+    headingHeight = 24,
+}
+
+local function presetLayout(width)
+    return width < COMPACT_PRESET_WIDTH and COMPACT_PRESET_LAYOUT or PRESET_LAYOUT
+end
+
 local DEFAULT_LABEL_SIZE = 19
 local LABEL_SIZES = {
     [15] = true,
@@ -95,11 +126,6 @@ local LABEL_SIZE_SORTED_POSITION = {
     [1] = 3,
     [2] = 2,
     [3] = 1,
-}
-
-local PAGE_BY_NAME = {
-    markers = 1,
-    presets = 2,
 }
 
 local fontCache = {}
@@ -177,11 +203,11 @@ end
 
 function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
     self.presetHandlers = presetHandlers
+    self.collapsedPresets = {}
     self.prettyui = assert(
         prettyUILibrary,
-        "Tile Marker requires the prettyui dependency to be enabled first")
+        "Tile Markers requires the prettyui dependency to be enabled first")
     self.renderer = drawLibrary or Draw
-    self.currentPage = "markers"
     self.recentColours = parseRecentColours(
         PersistentDB:GetString(RECENT_COLOURS_STORAGE_KEY))
     self.ignoreDepth = PersistentDB:GetBool(IGNORE_DEPTH_STORAGE_KEY) == true
@@ -199,12 +225,17 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
         10.0)
     self.currentStyle = Styles.fromColour(
         PersistentDB:GetInt(OUTLINE_COLOUR_STORAGE_KEY))
-    self.ribbonRegistration = self.prettyui.RibbonBar.Register({
-        id = "tilemarkers",
-        object = config.Obj.ROOFTILE,
-        tooltip = "Open Tile Markers",
-        onClick = function(_, active) self:setPanelOpen(active) end,
-    })
+    Event.SettingsLayerReady.Subscribe(SETTINGS_EVENT_ID, function(event)
+        self:mountSettings(event.component)
+    end)
+    Event.ContentLayerReady.Subscribe(CONTENT_EVENT_ID, function(event)
+        local parent = event.component
+        self:destroyContent()
+        Event.Draw.Subscribe(CONTENT_EVENT_ID, function()
+            Event.Draw.Unsubscribe(CONTENT_EVENT_ID)
+            self:mountContent(parent)
+        end)
+    end)
 end
 
 function UI:reset()
@@ -214,8 +245,6 @@ function UI:reset()
         self.presetHandlers.cancelEdit()
     end
     self.canvas = nil
-    self.window = nil
-    self.tabs = nil
     self.clearPromptWindow = nil
     self.clearPromptCallback = nil
     self.colourPromptWindow = nil
@@ -225,13 +254,6 @@ function UI:reset()
     self.colourPromptFill = nil
     self.colourPromptOutlineCornersOnly = nil
     self.colourPromptActions = nil
-    self.colourPicker = nil
-    self.thicknessText = nil
-    self.thicknessSlider = nil
-    self.labelSizeCombo = nil
-    self.presetPage = nil
-    self.presetPanels = {}
-    self.presetPanelsByID = {}
     self.presetEditOverlay = nil
     self.presetEditStatus = nil
     self.presetCreateWindow = nil
@@ -273,7 +295,6 @@ function UI:destroy()
         local prompt = self[field]
         if prompt ~= nil and prompt.root ~= nil then prompt:Destroy() end
     end
-    if self.window ~= nil then self.window:Destroy() end
     if self.canvas ~= nil and self.gameArea ~= nil
         and ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA) == self.gameArea then
         self.canvas:Destroy()
@@ -282,11 +303,28 @@ function UI:destroy()
 end
 
 function UI:shutdown()
+    Event.SettingsLayerReady.Unsubscribe(SETTINGS_EVENT_ID)
+    Event.ContentLayerReady.Unsubscribe(CONTENT_EVENT_ID)
+    self:destroySettings()
+    self:destroyContent()
     self:destroy()
-    if self.ribbonRegistration ~= nil then
-        self.ribbonRegistration:Destroy()
-        self.ribbonRegistration = nil
-    end
+end
+
+function UI:destroySettings()
+    if self.settingsView ~= nil then self.settingsView:Destroy() end
+    self.settingsView = nil
+    self.colourPicker = nil
+    self.thicknessText = nil
+    self.thicknessSlider = nil
+    self.labelSizeCombo = nil
+end
+
+function UI:destroyContent()
+    Event.Draw.Unsubscribe(CONTENT_EVENT_ID)
+    if self.contentView ~= nil then self.contentView:Destroy() end
+    self.contentView = nil
+    self.presetPanels = {}
+    self.presetPanelsByID = {}
 end
 
 function UI:clearPresetPanels()
@@ -322,7 +360,9 @@ function UI:finishPresetEdit(save)
 end
 
 function UI:startPresetEdit(presetID, presetName)
-    if self.presetEditOverlay ~= nil or self:isPromptOpen() then return false end
+    if self.gameArea == nil or self.presetEditOverlay ~= nil or self:isPromptOpen() then
+        return false
+    end
     local success = self.presetHandlers.startEdit(presetID)
     if not success then return false end
 
@@ -373,24 +413,32 @@ function UI:startPresetEdit(presetID, presetName)
         variant = "negative",
     })
     if overlay.root ~= nil then overlay.root:MoveToFront() end
-    self:setPanelOpen(false)
     return true
 end
 
+local function resizePresetPanels(self)
+    local width = self.contentView.contentWidth - self.presetLayout.padding * 2
+    for _, panel in pairs(self.presetPanelsByID) do
+        panel:SetSize(width, panel.height)
+    end
+end
+
 function UI:rebuildPresetPanels(focusPresetID)
-    if self.presetPage == nil then return end
-    local scrollY = self.presetPage.scrollY or 0
+    if self.contentView == nil then return end
+    local scrollY = self.contentView.scrollY or 0
+    local layout = self.presetLayout
+    local rightInset = layout.padding + layout.size
+    local buttonStep = layout.size + layout.gap
     self:clearPresetPanels()
 
     local presets = self.presetHandlers and self.presetHandlers.list() or {}
     if #presets == 0 then
-        self.presetPanels[1] = self.presetPage:AddText({
+        self.presetPanels[1] = self.contentView:AddText({
             text = "No presets saved.",
-            width = 344,
             height = 32,
             alignHorizontal = ui.AlignMode.CENTRE,
         })
-        self.presetPage:SetScrollPosition(scrollY)
+        self.contentView:SetScrollPosition(scrollY)
         return
     end
 
@@ -398,17 +446,18 @@ function UI:rebuildPresetPanels(focusPresetID)
         local presetID = preset.id
         local presetName = preset.name
         local active = self.presetHandlers.isActive(presetID)
-        local panel = self.presetPage:AddPanel({
-            width = 344,
-            height = 96,
+        local collapsed = self.collapsedPresets[presetID] ~= false
+        local panel = self.contentView:AddPanel({
+            height = collapsed and layout.collapsedHeight or layout.expandedHeight,
             popout = false,
             scrollable = false,
             layout = {
-                startY = 10,
-                paddingLeft = 14,
-                paddingRight = 14,
+                startY = layout.cardStartY,
+                paddingLeft = layout.padding,
+                paddingRight = layout.padding,
                 paddingBottom = 0,
-                rowGap = 8,
+                rowGap = layout.gap,
+                columnGap = layout.gap,
             },
             rowBackgroundColours = {
                 0x24211EFF,
@@ -418,62 +467,97 @@ function UI:rebuildPresetPanels(focusPresetID)
         })
         self.presetPanels[#self.presetPanels + 1] = panel
         self.presetPanelsByID[presetID] = panel
-        panel:AddSpriteButton("PENCIL", function()
-            self:promptForPresetRename(presetID, presetName)
-        end, {
-            size = 24,
-            tooltip = "Rename preset",
-        })
-        panel:AddText({
-            text = presetName,
-            inline = true,
-            width = 260,
-            height = 24,
-            maxLines = 1,
-        })
         panel:AddSpriteButton(active and "EYE" or "HIDE", function()
             local success = self.presetHandlers.setActive(presetID, not active)
             if success then self:rebuildPresetPanels() end
         end, {
-            x = 202,
-            marginTop = 12,
-            size = 24,
+            size = layout.size,
             tooltip = active and "Disable preset" or "Enable preset",
         })
-        panel:AddSpriteButton("SETTINGS", function()
-            self:startPresetEdit(presetID, presetName)
-        end, {
+        panel:AddText({
+            text = presetName,
             inline = true,
-            size = 24,
-            tooltip = "Edit preset tiles",
+            width = -(layout.padding * 2 + buttonStep * 2),
+            widthAnchor = 1,
+            height = layout.size,
+            maxLines = 1,
+            tooltip = presetName,
         })
-        panel:AddSpriteButton("EXPORT", function()
-            self:promptForPresetExport(presetID, presetName)
-        end, {
+        local chevronSprite = collapsed and id.Sprite.RS3_ICON_ACCORDION_0
+            or id.Sprite.RS3_ICON_ACCORDION_3
+        local chevron = panel:AddSprite(chevronSprite, {
             inline = true,
-            size = 24,
-            tooltip = "Export preset",
+            x = -rightInset,
+            xAnchor = 1,
+            size = layout.size,
+            tooltip = collapsed and "Show preset actions" or "Hide preset actions",
         })
-        panel:AddSpriteButton("TRASH", function()
-            self:promptForPresetDelete(presetID, presetName)
-        end, {
-            inline = true,
-            size = 24,
-            tooltip = "Delete preset",
-        })
+        chevron.root.enabled = true
+        chevron.root.clickthrough = false
+        chevron.root:Subscribe(ui.Hook.ONMOUSEOVER, function()
+            chevron:SetSprite(collapsed and id.Sprite.RS3_ICON_ACCORDION_1
+                or id.Sprite.RS3_ICON_ACCORDION_4)
+            return true
+        end)
+        chevron.root:Subscribe(ui.Hook.ONMOUSELEAVE, function()
+            chevron:SetSprite(chevronSprite)
+            return true
+        end)
+        chevron.root:Subscribe(ui.Hook.ONCLICK, function()
+            chevron:SetSprite(collapsed and id.Sprite.RS3_ICON_ACCORDION_2
+                or id.Sprite.RS3_ICON_ACCORDION_5)
+            self.collapsedPresets[presetID] = not collapsed
+            self:rebuildPresetPanels()
+            return false
+        end)
+        if not collapsed then
+            panel:AddSpriteButton("PENCIL", function()
+                self:promptForPresetRename(presetID, presetName)
+            end, {
+                x = -(rightInset + buttonStep * 3),
+                xAnchor = 1,
+                marginTop = layout.actionMargin,
+                size = layout.size,
+                tooltip = "Rename preset",
+            })
+            panel:AddSpriteButton("SETTINGS", function()
+                self:startPresetEdit(presetID, presetName)
+            end, {
+                inline = true,
+                x = -(rightInset + buttonStep * 2),
+                xAnchor = 1,
+                size = layout.size,
+                tooltip = "Edit preset tiles",
+            })
+            panel:AddSpriteButton("EXPORT", function()
+                self:promptForPresetExport(presetID, presetName)
+            end, {
+                inline = true,
+                x = -(rightInset + buttonStep),
+                xAnchor = 1,
+                size = layout.size,
+                tooltip = "Export preset",
+            })
+            panel:AddSpriteButton("TRASH", function()
+                self:promptForPresetDelete(presetID, presetName)
+            end, {
+                inline = true,
+                x = -rightInset,
+                xAnchor = 1,
+                size = layout.size,
+                tooltip = "Delete preset",
+            })
+        end
         panel:RefreshRowBackgrounds()
     end
+    -- Adding/removing cards can change the scrollbar gutter as well as the width.
+    resizePresetPanels(self)
     local focusedPanel = focusPresetID and self.presetPanelsByID[focusPresetID] or nil
     if focusedPanel ~= nil then
-        self.presetPage:ScrollToChild(focusedPanel)
+        self.contentView:ScrollToChild(focusedPanel)
     else
-        self.presetPage:SetScrollPosition(scrollY)
+        self.contentView:SetScrollPosition(scrollY)
     end
-end
-
-function UI:setPage(page)
-    self.currentPage = page
-    if self.tabs ~= nil then self.tabs:SetActive(PAGE_BY_NAME[page] or 1, false) end
 end
 
 function UI:updateStyleControls()
@@ -488,44 +572,13 @@ end
 
 
 
-function UI:setPanelOpen(open)
-    self.panelOpen = open == true
-    if self.ribbonRegistration ~= nil then
-        self.ribbonRegistration:SetActive(self.panelOpen)
-    end
-    if self.window ~= nil then
-        if self.panelOpen then self.window:Show() else self.window:Close() end
-    end
-end
-
-local function windowPosition(self)
-    local x = 56
-    local y = 72
-    if self.gameArea ~= nil then
-        x = clamp(x, 0, math.max(0, self.gameArea.width - WINDOW_WIDTH))
-        y = clamp(y, 0, math.max(0, self.gameArea.height - WINDOW_HEIGHT))
-    end
-    return x, y
-end
-
-function UI:buildWindow()
-    local windowX, windowY = windowPosition(self)
-    self.window = self.prettyui.Window.new(self.gameArea, {
-        title = "Tile Markers",
-        x = windowX,
-        y = windowY,
-        width = WINDOW_WIDTH,
-        height = WINDOW_HEIGHT,
-        minWidth = WINDOW_WIDTH,
-        minHeight = WINDOW_HEIGHT,
-        maxWidth = WINDOW_WIDTH,
-        maxHeight = WINDOW_HEIGHT,
-        onClose = function()
-            self.panelOpen = false
-            if self.ribbonRegistration ~= nil then
-                self.ribbonRegistration:SetActive(false)
-            end
-        end,
+function UI:mountSettings(parent)
+    self:destroySettings()
+    self.settingsView = self.prettyui.SimpleView.new(parent, {
+        width = 0,
+        height = 0,
+        widthAnchor = 1,
+        heightAnchor = 1,
         layout = {
             startY = 10,
             paddingLeft = 12,
@@ -534,24 +587,7 @@ function UI:buildWindow()
         },
     })
 
-    self.tabs = self.window:AddTabs({
-        { text = "Markers", value = "markers" },
-        { text = "Presets", value = "presets" },
-    }, {
-        height = 408,
-        onChange = function(_, _, page)
-            self:setPage(page)
-        end,
-        contentLayout = {
-            startY = 14,
-            paddingLeft = 14,
-            paddingRight = 14,
-            rowGap = CONTROL_GAP,
-        },
-    })
-
-    local markerPage = self.tabs:GetPage(1)
-    markerPage:AddCheckboxButton({
+    self.settingsView:AddCheckboxButton({
         {
             text = "Draw over scenery",
             value = "ignore_depth",
@@ -594,13 +630,13 @@ function UI:buildWindow()
             end
         end,
     })
-    markerPage:AddText({
+    self.settingsView:AddText({
         text = "Default marker colour and opacity",
         width = 296,
         height = 32,
         maxLines = 1,
     })
-    self.colourPicker = markerPage:AddColourPicker({
+    self.colourPicker = self.settingsView:AddColourPicker({
         inline = true,
         width = 40,
         height = 32,
@@ -614,37 +650,14 @@ function UI:buildWindow()
         end,
     })
 
-    self.presetPage = self.tabs:GetPage(2)
-    self.presetPage:AddText({
-        text = "Presets",
-        width = 280,
-        height = 32,
-        maxLines = 1,
-    })
-    self.presetPage:AddSpriteButton("PLUS", function()
-        self:promptForPresetCreation(false)
-    end, {
-        inline = true,
-        size = 24,
-        tooltip = "Add preset",
-    })
-    self.presetPage:AddSpriteButton("IMPORT", function()
-        self:promptForPresetImport()
-    end, {
-        inline = true,
-        size = 24,
-        tooltip = "Import preset",
-    })
-    self:rebuildPresetPanels()
-
-    self.thicknessText = markerPage:AddText({
+    self.thicknessText = self.settingsView:AddText({
         text = "",
         width = 344,
         height = 32,
         alignHorizontal = ui.AlignMode.CENTRE,
         maxLines = 1,
     })
-    self.thicknessSlider = markerPage:AddSlider({
+    self.thicknessSlider = self.settingsView:AddSlider({
         min = 0,
         max = 10,
         step = 0.5,
@@ -658,8 +671,8 @@ function UI:buildWindow()
             self:updateStyleControls()
         end,
     })
-    markerPage:AddText("Label size")
-    self.labelSizeCombo = markerPage:AddComboBox({
+    self.settingsView:AddText("Label size")
+    self.labelSizeCombo = self.settingsView:AddComboBox({
         width = 344,
         entries = {},
         tooltip = "Set the label size for every tile marker.",
@@ -687,11 +700,71 @@ function UI:buildWindow()
                 LABEL_SIZE_SORTED_POSITION[requestedLabelSizeEntry])
         end
     end
-    markerPage:AddText("Hold Ctrl+Shift over a tile, then right-click to mark it or edit its marker.")
+    self.settingsView:AddText("Hold Ctrl+Shift over a tile, then right-click to mark it or edit its marker.")
 
     self:updateStyleControls()
-    self:setPage(self.currentPage)
-    if not self.panelOpen then self.window:Close() end
+end
+
+function UI:mountContent(parent)
+    self:destroyContent()
+    local layout = presetLayout(parent.width)
+    self.presetLayout = layout
+    local rightInset = layout.padding + layout.size
+    local buttonStep = layout.size + layout.gap
+    self.contentView = self.prettyui.SimpleView.new(parent, {
+        width = 0,
+        height = 0,
+        widthAnchor = 1,
+        heightAnchor = 1,
+        layout = {
+            startY = layout.startY,
+            paddingLeft = layout.padding,
+            paddingRight = layout.padding,
+            paddingBottom = layout.padding,
+            rowGap = layout.gap,
+            columnGap = layout.gap,
+        },
+    })
+    local view = self.contentView
+    self.contentView:AddText({
+        text = layout.heading,
+        width = -(layout.padding * 2 + buttonStep * 2),
+        widthAnchor = 1,
+        height = layout.headingHeight,
+        maxLines = 1,
+    })
+    self.contentView:AddSpriteButton("PLUS", function()
+        self:promptForPresetCreation(false)
+    end, {
+        inline = true,
+        x = -(rightInset + buttonStep),
+        xAnchor = 1,
+        size = layout.size,
+        offsetY = (layout.headingHeight - layout.size) / 2,
+        tooltip = "Add preset",
+    })
+    self.contentView:AddSpriteButton("IMPORT", function()
+        self:promptForPresetImport()
+    end, {
+        inline = true,
+        x = -rightInset,
+        xAnchor = 1,
+        size = layout.size,
+        offsetY = (layout.headingHeight - layout.size) / 2,
+        tooltip = "Import preset",
+    })
+    self:rebuildPresetPanels()
+    view.root:Subscribe(ui.Hook.ONRESIZE, function()
+        if self.contentView ~= view then return end
+        if presetLayout(parent.width) ~= layout then
+            local scrollY = view.scrollY
+            self:mountContent(parent)
+            self.contentView:SetScrollPosition(scrollY)
+        else
+            view:Refresh()
+            resizePresetPanels(self)
+        end
+    end)
 end
 
 function UI:ensureMounted()
@@ -706,7 +779,7 @@ function UI:ensureMounted()
         self.gameArea = currentGameArea
     end
 
-    if self.canvas ~= nil and self.window ~= nil then
+    if self.canvas ~= nil then
         return true
     end
 
@@ -715,7 +788,6 @@ function UI:ensureMounted()
     self.canvas:SetSize(0, 0, 1.0, 1.0)
     self.canvas.clickthrough = true
 
-    self:buildWindow()
     return true
 end
 
