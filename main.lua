@@ -8,6 +8,22 @@ local UI = require("src/ui")
 
 local EVENT_ID = "tileMarker"
 local DRAW_DISTANCE = 30
+local RESIDENT_MARGIN = 16
+local RESIDENT_RANGE = DRAW_DISTANCE + RESIDENT_MARGIN + 1
+local DRAW_DISTANCE_FINE = DRAW_DISTANCE * 512
+local residentTiles = {}
+local residentAnchor
+local tilesRevision, presetsRevision, editorRevision
+local boundsX, boundsZ, boundsWidth, boundsHeight
+
+local function resetMarkers()
+    Draw.Reset()
+    RegionBindings.clear()
+    residentTiles = {}
+    residentAnchor = nil
+    UI.renderTiles = nil
+    UI.markerLabels = {}
+end
 
 log("loaded")
 Draw.Reset()
@@ -24,12 +40,12 @@ local function visibleMarkerSources()
     if regionBindings ~= nil then
         for _, binding in ipairs(regionBindings) do
             if visibleTiles[binding.target] ~= nil then
-                sourceCoords[#sourceCoords + 1] = binding.source
+                table.insert(sourceCoords, binding.source)
             end
         end
     else
         for coord in pairs(visibleTiles) do
-            sourceCoords[#sourceCoords + 1] = coord
+            table.insert(sourceCoords, coord)
         end
     end
     return sourceCoords
@@ -42,19 +58,14 @@ local function promptClearVisibleMarkers()
     end)
 end
 
-local function createPreset(name, sourceCoords)
-    local tiles = sourceCoords == nil
-        and Tiles:export()
-        or Tiles:exportCoords(sourceCoords)
+local function createVisiblePreset(name)
+    local sourceCoords = visibleMarkerSources()
+    local tiles = Tiles:exportCoords(sourceCoords)
+    if #tiles == 0 then return false, "Mark at least one tile first." end
     local success, result = Presets:create(name, tiles, true)
     if not success then return success, result end
 
-    local cleared
-    if sourceCoords == nil then
-        cleared = Tiles:clear()
-    else
-        cleared = Tiles:removeAll(sourceCoords)
-    end
+    local cleared = Tiles:removeAll(sourceCoords)
     if not cleared then
         Presets:delete(result.id)
         return false, "Could not remove the source tiles; preset was not kept."
@@ -78,11 +89,9 @@ UI:init(
             return success, message
         end,
         create = function(name)
-            return createPreset(name, nil)
+            return Presets:create(name, {}, true)
         end,
-        createVisible = function(name)
-            return createPreset(name, visibleMarkerSources())
-        end,
+        createVisible = createVisiblePreset,
         rename = function(id, name)
             return Presets:rename(id, name)
         end,
@@ -120,43 +129,72 @@ UI:init(
     },
     prettyui)
 
-Event.Draw.Subscribe(EVENT_ID, function()
-    Draw.BeginFrame()
-    if not UI:ensureMounted() then
+Event.Logic.Subscribe(EVENT_ID, function()
+    local player = Player.IsAvailable() and Player.GetEntity() or nil
+    if player == nil or not player.isValid or not UI:ensureMounted() then
+        if residentAnchor ~= nil then resetMarkers() end
         return
     end
 
+    local bounds = World.GetMapSquareBounds()
+    if bounds == nil then
+        if residentAnchor ~= nil then resetMarkers() end
+        return
+    end
+    if bounds.x ~= boundsX or bounds.y ~= boundsZ
+        or bounds.width ~= boundsWidth or bounds.height ~= boundsHeight then
+        resetMarkers()
+        boundsX, boundsZ = bounds.x, bounds.y
+        boundsWidth, boundsHeight = bounds.width, bounds.height
+    end
+
+    local coord = player.coordGrid
+    local moved = residentAnchor == nil or coord.level ~= residentAnchor.level
+        or math.abs(coord.x - residentAnchor.x) >= RESIDENT_MARGIN
+        or math.abs(coord.z - residentAnchor.z) >= RESIDENT_MARGIN
+    if moved or tilesRevision ~= Tiles.revision
+        or presetsRevision ~= Presets.revision or editorRevision ~= PresetEditor.revision then
+        if residentAnchor ~= nil and coord.level ~= residentAnchor.level then
+            resetMarkers()
+        end
+        residentAnchor = coord
+        local bindings = RegionBindings.resolveArea(coord, RESIDENT_RANGE)
+        local byPosition = {}
+        local function merge(tiles)
+            for tileCoord, metadata in pairs(tiles) do
+                byPosition[tileCoord:ToPacked()] = { coord = tileCoord, metadata = metadata }
+            end
+        end
+        merge(Tiles:query(coord, RESIDENT_RANGE, bindings))
+        merge(Presets:query(
+            coord, RESIDENT_RANGE, bindings,
+            PresetEditor:isActive() and PresetEditor.presetID or nil))
+        if PresetEditor:isActive() then
+            merge(PresetEditor:query(coord, RESIDENT_RANGE, bindings))
+        end
+        residentTiles = {}
+        for _, entry in pairs(byPosition) do
+            residentTiles[entry.coord] = entry.metadata
+        end
+        tilesRevision, presetsRevision, editorRevision =
+            Tiles.revision, Presets.revision, PresetEditor.revision
+    end
+    UI:syncMarkers(residentTiles, Minimenu.getHover(), DRAW_DISTANCE_FINE)
+end)
+
+Event.Draw.Subscribe(EVENT_ID, function()
+    if not UI:ensureMounted() then return end
     local player = Player.IsAvailable() and Player.GetEntity() or nil
     if player == nil or not player.isValid then
-        UI:draw({}, nil)
+        UI:drawLabels(nil)
         return
     end
-
-    local regionBindings = RegionBindings.resolveArea(player.coordGrid, DRAW_DISTANCE)
-    local tiles = Tiles:query(player.coordGrid, DRAW_DISTANCE, regionBindings)
-    local excludedPresetID = PresetEditor:isActive()
-        and PresetEditor.presetID
-        or nil
-    local presetTiles = Presets:query(
-        player.coordGrid,
-        DRAW_DISTANCE,
-        regionBindings,
-        excludedPresetID)
-    for coord, metadata in pairs(presetTiles) do
-        tiles[coord] = metadata
-    end
-    if PresetEditor:isActive() then
-        local editedTiles = PresetEditor:query(
-            player.coordGrid,
-            DRAW_DISTANCE,
-            regionBindings)
-        for coord, metadata in pairs(editedTiles) do
-            tiles[coord] = metadata
-        end
-    end
-    local hover = Minimenu.getHover()
-    UI:draw(tiles, hover)
+    Draw.UpdateCamera()
+    UI:drawLabels(player.position, player.coordGrid.level)
 end)
+
+Event.RegionCreated.Subscribe(EVENT_ID, resetMarkers)
+Event.RegionUpdated.Subscribe(EVENT_ID, resetMarkers)
 
 Minimenu.start({
     clearVisible = promptClearVisibleMarkers,
@@ -185,13 +223,15 @@ Event.GameStateChanged.Subscribe(EVENT_ID, function(gameStateChangedEvent)
         UI:destroySettings()
         UI:destroyContent()
         UI:destroy()
-        RegionBindings.clear()
-        Draw.Reset()
+        resetMarkers()
     end
 end)
 
 function PluginShutdown()
     Event.Draw.Unsubscribe(EVENT_ID)
+    Event.Logic.Unsubscribe(EVENT_ID)
+    Event.RegionCreated.Unsubscribe(EVENT_ID)
+    Event.RegionUpdated.Unsubscribe(EVENT_ID)
     Minimenu.shutdown()
     PresetEditor:cancel()
     Event.GameStateChanged.Unsubscribe(EVENT_ID)

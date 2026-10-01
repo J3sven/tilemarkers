@@ -51,6 +51,7 @@ local function normalizeTiles(tiles)
 end
 
 local Tiles = {
+    revision = 0,
     tiles = normalizeTiles(loadedTiles),
     customizationPreview = nil,
 }
@@ -99,6 +100,7 @@ local function coordKey(coord)
 end
 
 function Tiles:save()
+    self.revision = self.revision + 1
     return PersistentDB:SetStructuredData(STORAGE_KEY, storageData(self.tiles))
 end
 
@@ -255,6 +257,7 @@ function Tiles:previewCustomization(coord, label, colour, fill, outlineCornersOn
         key = coordKey(coord),
         metadata = preview,
     }
+    self.revision = self.revision + 1
     return true
 end
 
@@ -262,6 +265,7 @@ function Tiles:cancelCustomizationPreview(coord)
     local preview = self.customizationPreview
     if preview == nil or preview.key ~= coordKey(coord) then return false end
     self.customizationPreview = nil
+    self.revision = self.revision + 1
     return true
 end
 

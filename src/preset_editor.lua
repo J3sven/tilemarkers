@@ -1,6 +1,7 @@
 local Styles = require("src/styles")
 
 local Editor = {
+    revision = 0,
     presetID = nil,
     presetName = nil,
     tiles = {},
@@ -75,6 +76,7 @@ function Editor:begin(preset)
         local copied = copyTile(tile)
         self.tiles[keyFor(copied.level, copied.x, copied.z)] = copied
     end
+    self.revision = self.revision + 1
     return true
 end
 
@@ -83,6 +85,7 @@ function Editor:cancel()
     self.presetName = nil
     self.tiles = {}
     self.customizationPreview = nil
+    self.revision = self.revision + 1
 end
 
 function Editor:contains(coord)
@@ -103,12 +106,14 @@ function Editor:add(coord, metadata)
         outlineThickness = metadata and metadata.outlineThickness,
     })
     self.tiles[coordKey(coord)] = tile
+    self.revision = self.revision + 1
     return true
 end
 
 function Editor:remove(coord)
     if not self:contains(coord) then return false end
     self.tiles[coordKey(coord)] = nil
+    self.revision = self.revision + 1
     return true
 end
 
@@ -143,6 +148,7 @@ function Editor:previewCustomization(coord, label, colour, fill, outlineCornersO
         key = coordKey(coord),
         tile = preview,
     }
+    self.revision = self.revision + 1
     return true
 end
 
@@ -150,6 +156,7 @@ function Editor:cancelCustomizationPreview(coord)
     local preview = self.customizationPreview
     if preview == nil or preview.key ~= coordKey(coord) then return false end
     self.customizationPreview = nil
+    self.revision = self.revision + 1
     return true
 end
 
@@ -158,6 +165,7 @@ function Editor:setCustomization(coord, label, colour, fill, outlineCornersOnly)
     if tile == nil then return false end
     applyCustomization(tile, label, colour, fill, outlineCornersOnly)
     self:cancelCustomizationPreview(coord)
+    self.revision = self.revision + 1
     return true
 end
 

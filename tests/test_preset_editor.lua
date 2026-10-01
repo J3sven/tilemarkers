@@ -45,6 +45,17 @@ equal(true, Editor:add(added, {
     fill = true,
 }), "working copy can add a tile")
 local target = { name = "instanced target" }
+local cachedRevision, cachedQuery
+local function renderedMarker()
+    if cachedRevision ~= Editor.revision then
+        cachedQuery = Editor:query(existing, 30, {
+            { source = added, target = target },
+        })
+        cachedRevision = Editor.revision
+    end
+    return cachedQuery[target]
+end
+equal(0x445566FF, renderedMarker().outlineColour, "render cache starts with working style")
 equal(true, Editor:previewCustomization(
     added, "Preview", 0x010203FF, false, true),
     "working copy accepts a transient customization preview")
@@ -55,6 +66,7 @@ local previewQuery = Editor:query(existing, 30, {
 })
 equal("Preview", previewQuery[target].text, "preview reaches working-copy tile queries")
 equal(nil, Editor:export()[1].label, "preview is not committed to preset export")
+equal("Preview", renderedMarker().text, "preview invalidates the editor render cache")
 equal(
     true,
     Editor:cancelCustomizationPreview(added),
@@ -62,6 +74,8 @@ equal(
 equal(nil, Editor:getLabel(added), "cancel restores the pre-edit label")
 equal(0x445566FF, Editor:getColour(added), "cancel restores the pre-edit colour")
 equal(true, Editor:getFill(added), "cancel restores the pre-edit fill")
+equal(nil, renderedMarker().text, "cancel invalidates the editor preview render cache")
+equal(0x445566FF, renderedMarker().outlineColour, "cancel restores cached working style")
 equal(true, Editor:setCustomization(
     added, "Added", 0xAABBCCDD, false, true),
     "working copy can customize an added tile")
@@ -69,6 +83,7 @@ equal("Added", Editor:getLabel(added), "customized label stays in the working co
 equal(0xAABBCCDD, Editor:getColour(added), "customized colour stays in the working copy")
 equal(false, Editor:getFill(added), "customized fill stays in the working copy")
 equal(true, Editor:getOutlineCornersOnly(added), "customized corners stay in the working copy")
+equal("Added", renderedMarker().text, "committed customization invalidates the render cache")
 equal(1, #preset.tiles, "editing does not mutate the saved preset")
 equal(3200, preset.tiles[1].x, "saved preset keeps its original tile")
 
@@ -83,6 +98,7 @@ equal(3202, exported[1].x, "export contains the added tile")
 Editor:cancel()
 equal(false, Editor:isActive(), "cancel exits edit mode")
 equal(1, #preset.tiles, "cancel leaves saved tiles untouched")
+equal(nil, renderedMarker(), "ending the editor session discards cached working tiles")
 
 equal(true, Editor:begin(preset), "editor can reopen the saved preset")
 equal(false, Editor:getFill(existing), "opening preserves an explicit disabled fill")

@@ -188,17 +188,8 @@ local function normalizeLabelSize(value)
 end
 
 
-local function gridPosition(coord)
-    local available, level, x, z = pcall(function()
-        return coord.level, coord.x, coord.z
-    end)
-    if not available or level == nil or x == nil or z == nil then return nil end
-    return {
-        level = level,
-        x = x,
-        z = z,
-        key = string.format("%d:%d:%d", level, x, z),
-    }
+local function gridKey(coord)
+    return string.format("%d:%d:%d", coord.level, coord.x, coord.z)
 end
 
 function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
@@ -208,6 +199,10 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
         prettyUILibrary,
         "Tile Markers requires the prettyui dependency to be enabled first")
     self.renderer = drawLibrary or Draw
+    self.renderTiles = nil
+    self.renderSettings = nil
+    self.canvasHasLabels = false
+    self.markerLabels = {}
     self.recentColours = parseRecentColours(
         PersistentDB:GetString(RECENT_COLOURS_STORAGE_KEY))
     self.ignoreDepth = PersistentDB:GetBool(IGNORE_DEPTH_STORAGE_KEY) == true
@@ -245,6 +240,10 @@ function UI:reset()
         self.presetHandlers.cancelEdit()
     end
     self.canvas = nil
+    self.renderTiles = nil
+    self.renderSettings = nil
+    self.canvasHasLabels = false
+    self.markerLabels = {}
     self.clearPromptWindow = nil
     self.clearPromptCallback = nil
     self.colourPromptWindow = nil
@@ -741,7 +740,7 @@ function UI:mountContent(parent)
         xAnchor = 1,
         size = layout.size,
         offsetY = (layout.headingHeight - layout.size) / 2,
-        tooltip = "Add preset",
+        tooltip = "Add empty preset",
     })
     self.contentView:AddSpriteButton("IMPORT", function()
         self:promptForPresetImport()
@@ -1430,85 +1429,111 @@ function UI:getStyle()
     return Styles.copy(self.currentStyle)
 end
 
-function UI:drawTile(coord, metadata, style)
-    style = style or Styles.normalize(metadata, self.globalStyle)
-    local drawn = self.renderer.Tile{
-        coordGrid = coord,
-        outlineColour = style.outlineColour,
-        fillColour = style.fillColour,
-        fill = style.fill,
-        outlineCornersOnly = style.outlineCornersOnly,
-        outlineThickness = self.outlineThickness,
-        ignoreDepth = self.ignoreDepth,
-    }
-    if not drawn then return false end
-
-    local centre = ScreenConvert.CoordFineToScreen(coord:ToCoordFine(true), 100)
-    if metadata ~= nil and metadata.text ~= nil and metadata.text ~= "" and centre ~= nil then
-        local labelStyle = {
-            outlineColour = labelColour(style.outlineColour),
-            fontSize = self.labelSize,
-        }
-        local labelHeight = math.max(36, self.labelSize + 16)
-        self.canvas:AddText(
-            round(centre.x - 100),
-            round(centre.y - labelHeight / 2),
-            200,
-            labelHeight,
-            metadata.text,
-            labelTextConfig(labelStyle))
+-- Reconcile only when marker data, hover, or rendering options change.
+-- The renderer owns the retained entities; the canvas owns only their labels.
+function UI:syncMarkers(tiles, hover, drawDistance)
+    local hoverLevel = hover and hover.level
+    local hoverX = hover and hover.x
+    local hoverZ = hover and hover.z
+    if self.renderTiles == tiles
+        and self.renderHoverLevel == hoverLevel
+        and self.renderHoverX == hoverX and self.renderHoverZ == hoverZ
+        and self.renderThickness == self.outlineThickness
+        and self.renderIgnoreDepth == self.ignoreDepth
+        and self.renderFill == self.globalStyle.fill
+        and self.renderCorners == self.globalStyle.outlineCornersOnly
+        and self.renderLabelSize == self.labelSize
+        and self.renderDistance == drawDistance then
+        if not self.renderReady then
+            self.renderReady = self.renderer.Sync(self.renderSettings)
+        end
+        return self.renderReady
     end
-
-    return true
-end
-
-function UI:draw(tiles, hover)
-    self.canvas:Clear()
 
     local entries = {}
-    local entriesByPosition = {}
     for coord, metadata in pairs(tiles) do
-        local position = gridPosition(coord)
-        local entry = {
-            coord = coord,
-            metadata = metadata,
-            position = position,
-        }
-        if position ~= nil then
-            entriesByPosition[position.key] = entry
+        entries[gridKey(coord)] = { coord = coord, metadata = metadata }
+    end
+    if hover ~= nil then
+        local key = gridKey(hover)
+        local entry = entries[key]
+        if entry ~= nil then
+            entry.style = markedHoverStyle(entry.metadata, self.globalStyle)
         else
-            entries[#entries + 1] = entry
+            entries[key] = { coord = hover, style = EMPTY_HOVER_STYLE }
         end
     end
 
-    if hover ~= nil then
-        local hoverPosition = gridPosition(hover)
-        local existing = hoverPosition
-            and entriesByPosition[hoverPosition.key]
-            or nil
-        if existing ~= nil then
-            existing.coord = hover
-            existing.style = markedHoverStyle(existing.metadata, self.globalStyle)
-        else
-            local entry = {
-                coord = hover,
-                metadata = nil,
-                style = EMPTY_HOVER_STYLE,
-                position = hoverPosition,
+    local settings = {}
+    local labels = {}
+    for _, entry in pairs(entries) do
+        local style = entry.style or Styles.normalize(entry.metadata, self.globalStyle)
+        settings[#settings + 1] = {
+            coordGrid = entry.coord,
+            outlineColour = style.outlineColour,
+            fillColour = style.fillColour,
+            fill = style.fill,
+            outlineCornersOnly = style.outlineCornersOnly,
+            outlineThickness = self.outlineThickness,
+            ignoreDepth = self.ignoreDepth,
+            drawDistance = drawDistance,
+        }
+        local text = entry.metadata and entry.metadata.text
+        if text ~= nil and text ~= "" then
+            labels[#labels + 1] = {
+                coord = entry.coord,
+                fine = entry.coord:ToCoordFine(true),
+                text = text,
+                config = labelTextConfig({
+                    outlineColour = labelColour(style.outlineColour),
+                    fontSize = self.labelSize,
+                }),
             }
-            if hoverPosition ~= nil then
-                entriesByPosition[hoverPosition.key] = entry
-            else
-                entries[#entries + 1] = entry
+        end
+    end
+
+    self.renderReady = self.renderer.Sync(settings)
+    self.renderSettings = settings
+    self.markerLabels = labels
+    self.renderTiles = tiles
+    self.renderHoverLevel, self.renderHoverX, self.renderHoverZ = hoverLevel, hoverX, hoverZ
+    self.renderThickness = self.outlineThickness
+    self.renderIgnoreDepth = self.ignoreDepth
+    self.renderFill = self.globalStyle.fill
+    self.renderCorners = self.globalStyle.outlineCornersOnly
+    self.renderLabelSize = self.labelSize
+    self.renderDistance = drawDistance
+    return self.renderReady
+end
+
+function UI:drawLabels(playerPosition, playerLevel)
+    if self.canvasHasLabels then
+        self.canvas:Clear()
+        self.canvasHasLabels = false
+    end
+    if playerPosition == nil or self.renderDistance == nil then return end
+    local distanceSquared = self.renderDistance * self.renderDistance
+    local labelHeight = math.max(36, self.labelSize + 16)
+    for _, label in ipairs(self.markerLabels) do
+        local position = label.fine.position
+        -- Match native distance-to-tile-bounds culling, rather than showing
+        -- labels for every tile in the larger resident set.
+        local dx = math.max(0, math.abs(position.x - playerPosition.x) - 256)
+        local dz = math.max(0, math.abs(position.z - playerPosition.z) - 256)
+        if label.coord.level == playerLevel
+            and dx * dx + dz * dz <= distanceSquared then
+            local centre = ScreenConvert.CoordFineToScreen(label.fine, 100)
+            if centre ~= nil then
+                self.canvas:AddText(
+                    round(centre.x - 100),
+                    round(centre.y - labelHeight / 2),
+                    200,
+                    labelHeight,
+                    label.text,
+                    label.config)
+                self.canvasHasLabels = true
             end
         end
-    end
-
-    for _, entry in pairs(entriesByPosition) do
-        self:drawTile(entry.coord, entry.metadata, entry.style)
-    end
-    for _, entry in ipairs(entries) do
-        self:drawTile(entry.coord, entry.metadata, entry.style)
     end
 end
 

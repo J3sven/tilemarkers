@@ -88,6 +88,17 @@ equal("12345678", saved.levels[0][258][54321].outlineColour, "recolour stores ex
 equal("0E2A4542", saved.levels[0][258][54321].fillColour, "recolour stores derived fill")
 equal(true, saved.levels[0][258][54321].fill, "recolour stores selected fill state")
 equal(true, saved.levels[0][258][54321].outlineCornersOnly, "corner outline persists")
+local cachedRevision, cachedQuery
+local function renderedMarker()
+    if cachedRevision ~= Tiles.revision then
+        cachedQuery = Tiles:query(added, 0, {
+            { source = added, target = target },
+        })
+        cachedRevision = Tiles.revision
+    end
+    return cachedQuery[target]
+end
+equal("Safe tile", renderedMarker().text, "render cache starts with saved label")
 local savesBeforePreview = saveCount
 equal(
     true,
@@ -103,6 +114,7 @@ queried = Tiles:query(added, 0, {
 })
 equal("Preview", queried[target].text, "preview label reaches rendered tile queries")
 equal(0xCAFEBABE, queried[target].outlineColour, "preview style reaches rendered tile queries")
+equal("Preview", renderedMarker().text, "preview invalidates the render cache")
 equal(
     true,
     Tiles:cancelCustomizationPreview(added),
@@ -112,6 +124,8 @@ equal("Safe tile", Tiles:getLabel(added), "cancel restores the pre-edit label")
 equal(0x12345678, Tiles:getColour(added), "cancel restores the pre-edit colour")
 equal(true, Tiles:getFill(added), "cancel restores the pre-edit fill")
 equal(true, Tiles:getOutlineCornersOnly(added), "cancel restores pre-edit corners")
+equal("Safe tile", renderedMarker().text, "cancel invalidates the preview render cache")
+equal(0x12345678, renderedMarker().outlineColour, "cached preview colour is discarded")
 
 local savesBeforeCustomization = saveCount
 equal(
@@ -214,11 +228,13 @@ equal(nil, Tiles:query(added, 0, {
 equal(false, Tiles:contains(added), "removed marker is no longer detected")
 
 saveSucceeds = false
+local revisionBeforeRollback = Tiles.revision
 removed, removedCount = Tiles:removeAll({ source })
 equal(false, removed, "failed batch save is reported")
 equal(0, removedCount, "failed batch save reports no committed removals")
 equal(true, Tiles:query(source, 0, {
     { source = source, target = target },
 })[target] ~= nil, "failed batch save restores removed markers")
+assert(Tiles.revision > revisionBeforeRollback, "failed removal invalidates cached markers")
 
 print("test_tiles: ok")

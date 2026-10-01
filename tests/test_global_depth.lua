@@ -177,8 +177,8 @@ local prettyui = {
     },
 }
 local draw = {
-    Tile = function(settings)
-        submitted[#submitted + 1] = settings
+    Sync = function(settings)
+        for _, tile in ipairs(settings) do submitted[#submitted + 1] = tile end
         return true
     end,
 }
@@ -188,7 +188,7 @@ local UI = require("src/ui")
 UI:init({}, prettyui, draw)
 expect(UI:isHoverPreviewEnabled(), true, "hover preview defaults on")
 UI.canvas = {
-    Clear = function() end,
+    Clear = function() label = nil end,
     AddText = function(_, x, y, width, height, text, textConfig)
         label = {
             x = x,
@@ -207,13 +207,19 @@ local coord = {
     z = 10,
     ToPacked = function() return 123 end,
     ToCoordFine = function()
-        return {}
+        return { level = 0, position = { x = 10 * 512 + 256, z = 10 * 512 + 256 } }
     end,
 }
 
-expect(UI:drawTile(coord, {
+local function render(tiles, hover)
+    local ready = UI:syncMarkers(tiles, hover, 30 * 512)
+    UI:drawLabels(coord:ToCoordFine(true).position, coord.level)
+    return ready
+end
+
+expect(render({ [coord] = {
     text = "Global label",
-}), true, "tile draws")
+} }), true, "tile draws")
 expect(submitted[1].ignoreDepth, true, "global draw-over-scenery setting reaches renderer")
 expect(submitted[1].outlineThickness, 3.5, "global outline thickness reaches renderer")
 expect(label.textConfig.font, "font_19", "global label size reaches rendered labels")
@@ -227,7 +233,7 @@ local sameTileHover = {
     ToPacked = function() return 123 end,
     ToCoordFine = function() return {} end,
 }
-UI:draw({
+render({
     [coord] = {
         outlineColour = 0x00FFFFFF,
         fillColour = 0x00FFFF20,
@@ -254,7 +260,7 @@ local emptyHover = {
     ToPacked = function() return 456 end,
     ToCoordFine = function() return {} end,
 }
-UI:draw({ [coord] = {} }, emptyHover)
+render({ [coord] = {} }, emptyHover)
 expect(#submitted, 2, "unplaced hover draws beside the existing marker")
 local emptySubmission
 for _, settings in ipairs(submitted) do
@@ -271,11 +277,32 @@ local eastCoord = {
     ToPacked = function() return 124 end,
     ToCoordFine = function() return {} end,
 }
-UI:draw({
+render({
     [coord] = { outlineColour = 0x00FFFFFF },
     [eastCoord] = { outlineColour = 0xFF00FFFF },
 }, nil)
 expect(#submitted, 2, "neighbouring tiles are both submitted to PrettyUI")
+
+render({ [coord] = { text = "Retained label" } })
+local playerFine = coord:ToCoordFine(true)
+local originalProjection = ScreenConvert.CoordFineToScreen
+ScreenConvert.CoordFineToScreen = function() return { x = 150, y = 80 } end
+UI:drawLabels(playerFine.position, playerFine.level)
+expect(label.x, 50, "camera movement repositions a retained label without marker reconciliation")
+ScreenConvert.CoordFineToScreen = originalProjection
+playerFine.position.x = playerFine.position.x + 30 * 512 + 256
+UI:drawLabels(playerFine.position, playerFine.level)
+expect(label.text, "Retained label", "label remains at the native draw-distance boundary")
+playerFine.position.x = playerFine.position.x + 1
+UI:drawLabels(playerFine.position, playerFine.level)
+expect(label, nil, "label disappears beyond native draw distance despite retained marker")
+playerFine = coord:ToCoordFine(true)
+playerFine.level = 1
+UI:drawLabels(playerFine.position, playerFine.level)
+expect(label, nil, "labels do not leak onto another floor")
+UI:drawLabels(coord:ToCoordFine(true).position, coord.level)
+render({})
+expect(label, nil, "removing the last labelled marker clears its canvas text")
 
 UI.gameArea = { width = 800, height = 600 }
 local clearConfirmed = false
@@ -388,7 +415,7 @@ expect(acceptedOutlineCornersOnly, nil, "confirm leaves untouched corners inheri
 UI.globalStyle.fill = false
 UI.globalStyle.outlineCornersOnly = false
 submitted = {}
-UI:drawTile(coord, { fill = acceptedFill, outlineCornersOnly = acceptedOutlineCornersOnly })
+render({ [coord] = { fill = acceptedFill, outlineCornersOnly = acceptedOutlineCornersOnly } })
 expect(submitted[1].fill, true, "interacted fill no longer follows global changes")
 expect(submitted[1].outlineCornersOnly, false, "untouched corners still follow global changes")
 
@@ -686,37 +713,37 @@ local renderingOptions = markerOptions.options
 renderingOptions.onChange(nil, nil, "fill", true)
 renderingOptions.onChange(nil, nil, "outlineCornersOnly", true)
 submitted = {}
-UI:drawTile(coord, inheritedMarker)
+render({ [coord] = inheritedMarker })
 expect(submitted[1].fill, true, "placed marker follows global fill change")
 expect(submitted[1].outlineCornersOnly, true, "placed marker follows global corner change")
-UI:drawTile(coord, { fill = false, outlineCornersOnly = false })
+render({ [coord] = { fill = false, outlineCornersOnly = false } })
 expect(submitted[2].fill, false, "explicit fill off overrides enabled global")
 expect(submitted[2].outlineCornersOnly, false, "explicit corners off overrides enabled global")
 submitted = {}
-UI:draw({ [coord] = inheritedMarker }, sameTileHover)
+render({ [coord] = inheritedMarker }, sameTileHover)
 expect(submitted[1].fill, true, "marked hover preserves inherited fill")
 expect(submitted[1].outlineCornersOnly, true, "marked hover preserves inherited corners")
 renderingOptions.onChange(nil, nil, "fill", false)
 renderingOptions.onChange(nil, nil, "outlineCornersOnly", false)
 submitted = {}
-UI:drawTile(coord, inheritedMarker)
+render({ [coord] = inheritedMarker })
 expect(submitted[1].fill, false, "inherited fill updates without replacing marker")
 expect(submitted[1].outlineCornersOnly, false, "inherited corners update without replacing marker")
-UI:drawTile(coord, { fill = true, outlineCornersOnly = true })
+render({ [coord] = { fill = true, outlineCornersOnly = true } })
 expect(submitted[2].fill, true, "explicit fill on overrides disabled global")
 expect(submitted[2].outlineCornersOnly, true, "explicit corners on override disabled global")
 local mountedPrettyUI = UI.prettyui
 renderingOptions.onChange(nil, nil, "fill", true)
 UI:init(UI.presetHandlers, prettyui, draw)
 submitted = {}
-UI:drawTile(coord, inheritedMarker)
+render({ [coord] = inheritedMarker })
 expect(submitted[1].fill, true, "enabled global fill survives settings reload")
 expect(submitted[1].outlineCornersOnly, false, "disabled global corners survive settings reload")
 renderingOptions.onChange(nil, nil, "outlineCornersOnly", true)
 renderingOptions.onChange(nil, nil, "fill", false)
 UI:init(UI.presetHandlers, prettyui, draw)
 submitted = {}
-UI:drawTile(coord, inheritedMarker)
+render({ [coord] = inheritedMarker })
 expect(submitted[1].fill, false, "disabled global fill survives settings reload")
 expect(submitted[1].outlineCornersOnly, true, "enabled global corners survive settings reload")
 UI.prettyui = mountedPrettyUI
@@ -809,7 +836,7 @@ expect(editOverlay.destroyed, true, "cancel destroys the edit overlay")
 expect(UI.presetEditOverlay, nil, "cancel exits UI edit mode")
 
 UI.presetHandlers.saveEdit = function()
-    return false, "A preset must contain at least one tile."
+    return false
 end
 presetControl("SETTINGS").action()
 local failedSaveOverlay = editOverlay
@@ -818,10 +845,6 @@ expect(
     UI.presetEditOverlay,
     failedSaveOverlay,
     "failed save keeps preset edit mode open")
-expect(
-    failedSaveOverlay.addedComponents[2].content,
-    "A preset must contain at least one tile.",
-    "failed save explains the problem in the overlay")
 local previousSettings = UI.settingsView
 local previousCanvas = UI.canvas
 local previousContent = UI.contentView

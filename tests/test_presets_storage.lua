@@ -6,6 +6,7 @@ local function equal(expected, actual, context)
 end
 
 local saved
+local saveSucceeds = true
 PersistentDB = {
     GetStructuredData = function()
         return {
@@ -33,8 +34,8 @@ PersistentDB = {
         }
     end,
     SetStructuredData = function(_, _, value)
-        saved = value
-        return true
+        if saveSucceeds then saved = value end
+        return saveSucceeds
     end,
 }
 
@@ -52,6 +53,7 @@ equal("B3489FFF", saved.presets[1].tiles[1].outlineColour, "preset outline saves
 equal("395E2D8C", saved.presets[1].tiles[1].fillColour, "preset fill saves as hex")
 equal(true, saved.presets[1].tiles[1].outlineCornersOnly, "preset corner outline saves")
 
+local revisionBeforeEdit = Presets.revision
 equal(true, Presets:updateTiles("preset_1", {
     {
         x = 3300,
@@ -63,6 +65,7 @@ equal(true, Presets:updateTiles("preset_1", {
     },
 }), "preset edit replaces its tiles")
 equal(3300, Presets:get("preset_1").tiles[1].x, "edited tile reaches live preset data")
+assert(Presets.revision > revisionBeforeEdit, "editing preset tiles invalidates render queries")
 local sourceCoord = { level = 1, x = 3300, z = 3301 }
 equal(
     "preset_1",
@@ -87,9 +90,16 @@ equal(
     Presets:findActiveAt(sourceCoord).id,
     "later active preset matches rendering precedence")
 equal("Edited", saved.presets[1].tiles[1].label, "edited label reaches storage")
-local emptySuccess = Presets:updateTiles("preset_1", {})
-equal(false, emptySuccess, "preset edit rejects an empty tile set")
-equal(3300, Presets:get("preset_1").tiles[1].x, "rejected edit preserves saved tiles")
+
+local revisionBeforeRollback = Presets.revision
+saveSucceeds = false
+equal(false, Presets:updateTiles("preset_1", {
+    { x = 3500, z = 3501, level = 1, label = "Unsaved" },
+}), "failed preset edit is reported")
+equal(3300, Presets:get("preset_1").tiles[1].x, "failed edit restores rendered tiles")
+equal("Edited", Presets:get("preset_1").tiles[1].label, "failed edit restores rendered labels")
+assert(Presets.revision > revisionBeforeRollback, "failed edit invalidates cached preset tiles")
+saveSucceeds = true
 
 local mixedStyles = {
     {},
@@ -136,5 +146,43 @@ local importedId = importedPreset.id
 package.loaded["src/presets"] = nil
 Presets = require("src/presets")
 assertMixedStyles(Presets:get(importedId), "reloaded imported preset")
+
+local created, emptyPreset = Presets:create("  Empty route  ", {}, true)
+assert(created, emptyPreset)
+equal("Empty route", emptyPreset.name, "empty preset keeps its trimmed name")
+equal(nil, next(emptyPreset.tiles), "new preset has no tiles")
+local emptyID = emptyPreset.id
+package.loaded["src/presets"] = nil
+Presets = require("src/presets")
+equal("Empty route", Presets:get(emptyID).name, "empty preset survives storage reload")
+equal(nil, next(Presets:get(emptyID).tiles), "reload does not populate an empty preset")
+equal(true, Presets:isActive(emptyID), "empty preset activation survives reload")
+local emptyExported, emptyToken = Presets:export(emptyID)
+assert(emptyExported, emptyToken)
+local emptyImported, importedEmpty = Presets:import(emptyToken)
+assert(emptyImported, importedEmpty)
+equal("Empty route", importedEmpty.name, "empty export preserves preset name")
+equal(nil, next(importedEmpty.tiles), "empty preset round-trips through sharing")
+
+local Editor = require("src/preset_editor")
+equal(true, Editor:begin(Presets:get(emptyID)), "empty preset can enter edit mode")
+equal(true, Presets:updateTiles(emptyID, Editor:export()), "empty edit can be saved")
+equal(true, Editor:add(sourceCoord, { text = "First tile" }), "first tile can be added")
+equal(true, Presets:updateTiles(emptyID, Editor:export()), "first tile can be saved")
+equal("First tile", Presets:get(emptyID).tiles[1].label, "saved preset contains its first tile")
+equal(true, Editor:remove(sourceCoord), "last tile can be removed")
+equal(true, Presets:updateTiles(emptyID, Editor:export()), "preset can be saved empty again")
+Editor:cancel()
+package.loaded["src/presets"] = nil
+Presets = require("src/presets")
+equal(nil, next(Presets:get(emptyID).tiles), "emptied preset survives another reload")
+
+local previousNextID = Presets.data.nextId
+saveSucceeds = false
+equal(false, Presets:create("Unsaved empty", {}, true), "failed empty creation is reported")
+equal(previousNextID, Presets.data.nextId, "failed empty creation restores the ID sequence")
+equal(nil, Presets:get("preset_" .. tostring(previousNextID)), "failed empty creation leaves no preset")
+equal(false, Presets:isActive("preset_" .. tostring(previousNextID)), "failed empty creation leaves no activation")
+saveSucceeds = true
 
 print("test_presets_storage: ok")

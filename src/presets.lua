@@ -7,6 +7,7 @@ local COLOUR_ENCODING = "hex"
 local storedData = PersistentDB:GetStructuredData(STORAGE_KEY)
 
 local Presets = {
+    revision = 0,
     data = storedData or {},
 }
 
@@ -95,7 +96,7 @@ local function normalizeData(data)
             if numericId ~= nil then
                 normalized.nextId = math.max(normalized.nextId, numericId + 1)
             end
-            if name ~= "" and #tiles > 0 and not knownIds[id] then
+            if name ~= "" and not knownIds[id] then
                 knownIds[id] = true
                 normalized.presets[#normalized.presets + 1] = {
                     id = id,
@@ -151,6 +152,7 @@ local function storageData(data)
 end
 
 function Presets:save()
+    self.revision = self.revision + 1
     return PersistentDB:SetStructuredData(STORAGE_KEY, storageData(self.data))
 end
 
@@ -223,8 +225,6 @@ function Presets:create(name, tiles, active)
     tiles = normalizeTiles(tiles)
     if name == "" then
         return false, "Enter a preset name."
-    elseif #tiles == 0 then
-        return false, "Mark at least one tile first."
     end
     local previousNextId = self.data.nextId
     local id = "preset_" .. tostring(previousNextId)
@@ -265,9 +265,6 @@ function Presets:updateTiles(id, tiles)
         return false, "Preset no longer exists."
     end
     local normalized = normalizeTiles(tiles)
-    if #normalized == 0 then
-        return false, "A preset must contain at least one tile."
-    end
 
     local previousTiles = preset.tiles
     preset.tiles = normalized

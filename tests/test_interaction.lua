@@ -18,16 +18,23 @@ end
 
 Event = {
     Draw = event("Draw"),
+    Logic = event("Logic"),
+    RegionCreated = event("RegionCreated"),
+    RegionUpdated = event("RegionUpdated"),
     MiniMenuReady = event("MiniMenuReady"),
     MiniMenuClosed = event("MiniMenuClosed"),
     GameStateChanged = event("GameStateChanged"),
 }
 
-local hover = { name = "target" }
+local hover = {
+    name = "target", level = 0, x = 10, z = 10,
+    ToPacked = function() return 123 end,
+}
 local cursorHover = hover
 local mousePosition = { x = 100, y = 100 }
 local source = { name = "source" }
-local playerCoord = { name = "player" }
+local playerCoord = { name = "player", level = 0, x = 10, z = 10 }
+local playerPosition = { x = 10 * 512 + 256, y = 0, z = 10 * 512 + 256 }
 local controlDown = false
 local shiftDown = false
 local keyboardBlocked = false
@@ -48,8 +55,17 @@ ScreenConvert = {
 Player = {
     IsAvailable = function() return true end,
     GetEntity = function()
-        return { isValid = true, coordGrid = playerCoord }
+        return setmetatable({
+            isValid = true, coordGrid = playerCoord, position = playerPosition,
+        }, {
+            __index = function(_, key)
+                error("Unsupported PlayerEntity property: " .. key)
+            end,
+        })
     end,
+}
+World = {
+    GetMapSquareBounds = function() return { x = 0, y = 0, width = 2, height = 2 } end,
 }
 MiniMenuActionType = {
     WALK = 23,
@@ -239,16 +255,19 @@ local editMarked = false
 local editAddedSource
 local editRemovedSource
 local PresetEditor = {
+    revision = 0,
     presetID = nil,
     isActive = function() return editActive end,
     begin = function(self, preset)
         editActive = true
         self.presetID = preset.id
+        self.revision = self.revision + 1
         return true
     end,
     cancel = function(self)
         editActive = false
         self.presetID = nil
+        self.revision = self.revision + 1
     end,
     export = function()
         return { { x = 3300, z = 3301, level = 0 } }
@@ -302,10 +321,11 @@ local UI = {
         initializedPresetHandlers = handlers
     end,
     ensureMounted = function() return true end,
-    draw = function(_, tiles, tile)
+    syncMarkers = function(_, tiles, tile)
         drawnTiles = tiles
         drawnHover = tile
     end,
+    drawLabels = function() end,
     getStyle = function()
         return {
             outlineColour = 0x12345678,
@@ -359,21 +379,23 @@ log = function() end
 
 dofile("main.lua")
 
-equal(nil, Event.Logic, "legacy hotkey logic event is not required")
-equal(nil, Event.MiniMenuEntrySelected, "legacy click interception event is not required")
+local function frame()
+    callbacks.Logic()
+    callbacks.Draw()
+end
 
-callbacks.Draw()
+frame()
 equal(nil, drawnHover, "hover is hidden without both modifiers")
 controlDown = true
 shiftDown = true
-callbacks.Draw()
+frame()
 equal(hover, drawnHover, "Ctrl+Shift lights the hovered tile")
 hoverPreviewEnabled = false
-callbacks.Draw()
+frame()
 equal(nil, drawnHover, "disabled hover preview stays hidden with modifiers")
 hoverPreviewEnabled = true
 keyboardBlocked = true
-callbacks.Draw()
+frame()
 equal(nil, drawnHover, "blocked keyboard input hides the hover")
 keyboardBlocked = false
 
@@ -528,18 +550,18 @@ miniMenuOpen = true
 cursorHover = movedHover
 mousePosition = { x = 240, y = 180 }
 controlDown = false
-callbacks.Draw()
+frame()
 equal(hover, drawnHover, "open menu keeps the tile that created its entries highlighted")
 controlDown = true
 miniMenuOpen = false
 callbacks.MiniMenuClosed({})
-callbacks.Draw()
+frame()
 equal(nil, drawnHover, "menu selection position is not previewed as another marker")
 addedEntry = nil
 readyMenu()
 equal(nil, addedEntry, "menu selection position does not create a follow-up tile action")
 mousePosition = { x = 245, y = 180 }
-callbacks.Draw()
+frame()
 equal(movedHover, drawnHover, "moving away from the menu selection restores live highlighting")
 cursorHover = hover
 selectedEntry.action(table.unpack(selectedEntry.args, 1, selectedEntry.args.n))
@@ -614,7 +636,7 @@ equal(nil, addedEntry, "customization prompt suppresses tile menu entries")
 
 promptOpen = false
 equal(true, initializedPresetHandlers.startEdit("preset_1"), "preset edit handler starts")
-callbacks.Draw()
+frame()
 equal("preset_1", excludedPresetID, "draw excludes the saved copy of the edited preset")
 equal("Working copy", drawnTiles[hover].text, "draw includes the preset working copy")
 editMarked = false
@@ -638,5 +660,43 @@ equal(true, initializedPresetHandlers.saveEdit(), "save handler commits preset e
 equal("preset_1", updatedPresetID, "save targets the edited preset")
 equal(3300, updatedPresetTiles[1].x, "save commits the working tile set")
 equal(false, editActive, "successful save leaves preset edit mode")
+
+-- Exercise the actual label renderer through main's Draw subscription, using
+-- PlayerEntity's native position/coordGrid contract (there is no coordFine).
+UI.drawLabels = dofile("src/ui.lua").drawLabels
+UI.renderDistance = 30 * 512
+UI.labelSize = 19
+UI.markerLabels = {
+    {
+        coord = { level = 0 },
+        fine = { level = 0, position = { x = 10 * 512 + 256, y = 0, z = 10 * 512 + 256 } },
+        text = "Marker label",
+        config = {},
+    },
+}
+local renderedLabel
+UI.canvas = {
+    Clear = function() renderedLabel = nil end,
+    AddText = function(_, x, y, _, _, text)
+        renderedLabel = { x = x, y = y, text = text }
+    end,
+}
+local screenX = 150
+ScreenConvert.CoordFineToScreen = function() return { x = screenX, y = 80 } end
+callbacks.Draw()
+equal("Marker label", renderedLabel and renderedLabel.text, "native player properties allow label rendering")
+screenX = 175
+callbacks.Draw()
+equal(75, renderedLabel.x, "frame projection tracks camera movement")
+playerCoord.level = 1
+callbacks.Draw()
+equal(nil, renderedLabel, "changing the player's floor clears the label")
+playerCoord.level = 0
+playerPosition.x = playerPosition.x + 30 * 512 + 256
+callbacks.Draw()
+equal("Marker label", renderedLabel and renderedLabel.text, "label renders at the fine-position distance boundary")
+playerPosition.x = playerPosition.x + 1
+callbacks.Draw()
+equal(nil, renderedLabel, "sub-tile player movement past the boundary hides the label")
 
 print("test_interaction: ok")
