@@ -53,7 +53,7 @@ local function applyProperties(retained, style, lineWidth)
         shape.lineWidth = lineWidth
         retained.lineWidth = lineWidth
     end
-    if retained.drawDistance ~= style.drawDistance then
+    if not retained.dynamic and retained.drawDistance ~= style.drawDistance then
         shape:SetDrawDistance(style.drawDistance)
         retained.drawDistance = style.drawDistance
     end
@@ -67,13 +67,23 @@ local function setShape(entry, part, shapeData)
     local retained = entry[part]
     if retained == nil then
         serial = serial + 1
-        local shape = ShapeList.CreateEntity(string.format("tilemarkers_tile_%d", serial))
+        local name = string.format("tilemarkers_tile_%d", serial)
+        local shape
+        if entry.dynamic then
+            shape = ShapeList.CreateInstance(name)
+        else
+            shape = ShapeList.CreateEntity(name)
+        end
         if shape == nil then return false end
-        retained = { shape = shape }
+        retained = { shape = shape, dynamic = entry.dynamic }
         entry[part] = retained
-        shape.alignType = ShapeEntityAlignType.NONE
-        -- Changing this property rebuilds the native visual; a resident never moves.
-        shape.coordGrid = entry.coordGrid
+        if entry.dynamic then
+            shape.translation = entry.anchor
+        else
+            shape.alignType = ShapeEntityAlignType.NONE
+            -- Changing this property rebuilds the native visual; a resident never moves.
+            shape.coordGrid = entry.coordGrid
+        end
     end
     if not retained.shape:SetShapeData(shapeData) then
         removeShape(entry, part)
@@ -477,6 +487,7 @@ function Draw.Sync(settingsList)
                 }
             end
             entry.style = normaliseStyle(settings)
+            entry.customizing = settings.customizing == true
             desired[key] = entry
         end
     end
@@ -490,6 +501,24 @@ function Draw.Sync(settingsList)
     splitTiles = {}
     -- All desired outlines are known before either member of a shared edge builds.
     for key, entry in pairs(tiles) do
+        -- A preview colour can change both sides of a shared edge. Keep the
+        -- immediate neighbours dynamic too, until the customization ends.
+        local dynamic = entry.customizing
+        if not dynamic then
+            for _, offset in pairs(NEIGHBOURS) do
+                local neighbour = desired[tileKey(
+                    entry.level, entry.tileX + offset.x, entry.tileZ + offset.z)]
+                if neighbour ~= nil and neighbour.customizing then
+                    dynamic = true
+                    break
+                end
+            end
+        end
+        if entry.dynamic ~= dynamic then
+            removeShape(entry, "main")
+            removeShape(entry, "split")
+            entry.dynamic = dynamic
+        end
         entry.mask = splitOutlineSides(entry, desired)
         entry.splitTarget = splitSignature(entry)
         if entry.mask ~= 0 then splitTiles[key] = entry end

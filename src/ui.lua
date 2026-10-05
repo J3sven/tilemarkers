@@ -1422,6 +1422,7 @@ function UI:promptForCustomization(
         width = 168,
         variant = "negative",
     })
+    previewColourPrompt(self)
     return true
 end
 
@@ -1430,7 +1431,7 @@ function UI:getStyle()
 end
 
 -- Reconcile only when marker data, hover, or rendering options change.
--- The renderer owns the retained entities; the canvas owns only their labels.
+-- The renderer owns retained shapes; the canvas owns only their labels.
 function UI:syncMarkers(tiles, hover, drawDistance)
     local hoverLevel = hover and hover.level
     local hoverX = hover and hover.x
@@ -1470,6 +1471,7 @@ function UI:syncMarkers(tiles, hover, drawDistance)
         local style = entry.style or Styles.normalize(entry.metadata, self.globalStyle)
         settings[#settings + 1] = {
             coordGrid = entry.coord,
+            customizing = entry.metadata and entry.metadata.customizing,
             outlineColour = style.outlineColour,
             fillColour = style.fillColour,
             fill = style.fill,

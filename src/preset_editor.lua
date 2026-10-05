@@ -41,6 +41,7 @@ local function metadataFor(tile)
         fill = tile.fill,
         outlineCornersOnly = tile.outlineCornersOnly,
         outlineThickness = tile.outlineThickness,
+        customizing = tile.customizing,
     }
 end
 
@@ -144,6 +145,7 @@ function Editor:previewCustomization(coord, label, colour, fill, outlineCornersO
     if tile == nil then return false end
     local preview = copyTile(tile)
     applyCustomization(preview, label, colour, fill, outlineCornersOnly)
+    preview.customizing = true
     self.customizationPreview = {
         key = coordKey(coord),
         tile = preview,

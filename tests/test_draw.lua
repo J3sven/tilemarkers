@@ -16,12 +16,15 @@ ShapeData = { new = function()
     return {}
 end }
 local submitted, failUploads = {}, 0
-ShapeList = { CreateEntity = function(name)
-    local values = { name = name, uploads = 0, coordWrites = 0 }
+local function createShape(name, kind)
+    local values = { name = name, kind = kind, uploads = 0, coordWrites = 0 }
     local shape = setmetatable({}, {
         __index = values,
         __newindex = function(_, key, value)
-            assert(key ~= "translation", "fixed entities have no translation transform")
+            assert(kind ~= "entity" or key ~= "translation",
+                "fixed entities have no translation transform")
+            assert(kind ~= "instance" or (key ~= "coordGrid" and key ~= "alignType"),
+                "instances use an explicit world-space translation")
             stats.properties = stats.properties + 1
             if key == "coordGrid" then
                 values.coordWrites = values.coordWrites + 1
@@ -49,6 +52,7 @@ ShapeList = { CreateEntity = function(name)
         return true
     end
     values.SetDrawDistance = function(_, distance)
+        assert(kind == "entity", "instances have no SetDrawDistance method")
         stats.properties = stats.properties + 1
         values.drawDistance = distance
     end
@@ -59,7 +63,11 @@ ShapeList = { CreateEntity = function(name)
     end
     submitted[#submitted + 1] = shape
     return shape
-end }
+end
+ShapeList = {
+    CreateEntity = function(name) return createShape(name, "entity") end,
+    CreateInstance = function(name) return createShape(name, "instance") end,
+}
 World = { GetGroundHeight = function(_, x, z)
     stats.samples = stats.samples + 1
     return (x // 512) * 10 + (z // 512), true
@@ -85,7 +93,10 @@ local function shapesAt(at)
     local result = {}
     for _, shape in ipairs(submitted) do
         local placed = shape.coordGrid
-        if not shape.destroyed and placed.level == at.level and placed.x == at.x and placed.z == at.z then
+        local position = shape.translation
+        local matches = placed and placed.level == at.level and placed.x == at.x and placed.z == at.z
+            or position and position.x == at.x * 512 + 256 and position.z == at.z * 512 + 256
+        if not shape.destroyed and matches then
             result[#result + 1] = shape
         end
     end
@@ -247,4 +258,75 @@ for _, shape in ipairs(submitted) do
     expect(shape.destroyed, true, "empty desired set deletes every resident")
 end
 Draw.Reset()
+submitted = {}
+west = marker(westCoord, 0x112233)
+east = marker(eastCoord, 0x112233)
+plain = marker(plainCoord, 0xABCDEF)
+assert(Draw.Sync{ west, east, plain })
+local originalWest = shapeWithLines(westCoord, 8)
+local originalEast = shapeWithLines(eastCoord, 8)
+plainShape = shapeWithLines(plainCoord, 8)
+west.customizing = true
+assert(Draw.Sync{ west, east, plain })
+expect(originalWest.destroyed, true, "opening customization removes the original visual")
+expect(originalEast.destroyed, true, "shared-edge neighbour becomes live too")
+local preview = shapeWithLines(westCoord, 8)
+expect(preview.kind, "instance", "customization uses dynamic geometry")
+expect(preview.translation.y, 114, "preview keeps the entity's ground anchor")
+expect(shapeWithLines(plainCoord, 8), plainShape, "unrelated marker is undisturbed")
+west.outlineColour = 0x44556680
+west.fill = true
+west.outlineCornersOnly = true
+assert(Draw.Sync{ west, east, plain })
+expect(preview.shapeData.rgba[1], 0x44556680, "preview colour and opacity update live")
+expect(#preview.shapeData.tris, 6, "preview can add fill")
+expect(#preview.shapeData.lines, 12, "preview corners exclude the shared edge")
+expect(#shapesAt(eastCoord), 2, "neighbour splits its edge for the preview colour")
+west.fill = false
+assert(Draw.Sync{ west, east, plain })
+expect(#preview.shapeData.tris, 0, "preview clears fill immediately")
+local previewSplit = shapeWithLines(westCoord, 4)
+west.customizing = false
+assert(Draw.Sync{ west, east, plain })
+expect(preview.destroyed, true, "confirm removes the live main shape")
+expect(previewSplit.destroyed, true, "confirm removes the live split shape")
+local confirmed = shapeWithLines(westCoord, 12)
+expect(confirmed.kind, "entity", "confirm creates a fixed marker")
+expect(confirmed.shapeData.rgba[1], 0x44556680, "confirmed marker keeps the desired colour")
+expect(#confirmed.shapeData.tris, 0, "confirmed marker keeps fill disabled")
+west.customizing = true
+assert(Draw.Sync{ west, east, plain })
+local cancelled = shapeWithLines(westCoord, 12)
+west.outlineColour = east.outlineColour
+west.outlineCornersOnly = false
+west.fill = true
+assert(Draw.Sync{ west, east, plain })
+expect(#shapesAt(eastCoord), 1, "matching preview colour clears neighbour split")
+west.customizing = false
+west.outlineColour = 0x44556680
+west.outlineCornersOnly = true
+west.fill = false
+assert(Draw.Sync{ west, east, plain })
+expect(cancelled.destroyed, true, "cancel destroys the preview")
+local restored = shapeWithLines(westCoord, 12)
+expect(restored.kind, "entity", "cancel restores a fresh fixed marker")
+expect(restored.shapeData.rgba[1], 0x44556680, "cancel restores the previous colour")
+expect(#restored.shapeData.tris, 0, "cancel restores the previous fill")
+expect(#shapesAt(eastCoord), 2, "cancel restores neighbour shared-edge geometry")
+west.customizing = true
+assert(Draw.Sync{ west, east, plain })
+local unchangedPreview = shapeWithLines(westCoord, 12)
+west.customizing = false
+assert(Draw.Sync{ west, east, plain })
+expect(unchangedPreview.destroyed, true, "closing without changes still removes the preview")
+expect(shapeWithLines(westCoord, 12).kind, "entity", "unchanged customization restores an entity")
+west.customizing = true
+failUploads = 1
+assert(not Draw.Sync{ west, east, plain }, "preview transition reports upload failure")
+assert(Draw.Sync{ west, east, plain }, "preview transition retries missing geometry")
+expect(shapeWithLines(westCoord, 12).kind, "instance", "retry remains in preview mode")
+Draw.Reset()
+for _, shape in ipairs(submitted) do
+    expect(shape.destroyed, true, "reset cleans up both rendering modes")
+end
 print("test_draw: ok")
