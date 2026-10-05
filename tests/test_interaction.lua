@@ -676,6 +676,7 @@ UI.markerLabels = {
 }
 local renderedLabel
 UI.canvas = {
+    xyGlobal = { x = 0, y = 0 },
     Clear = function() renderedLabel = nil end,
     AddText = function(_, x, y, _, _, text)
         renderedLabel = { x = x, y = y, text = text }

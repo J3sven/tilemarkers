@@ -240,6 +240,7 @@ function UI:reset()
         self.presetHandlers.cancelEdit()
     end
     self.canvas = nil
+    self.labelLayer = nil
     self.renderTiles = nil
     self.renderSettings = nil
     self.canvasHasLabels = false
@@ -294,8 +295,9 @@ function UI:destroy()
         local prompt = self[field]
         if prompt ~= nil and prompt.root ~= nil then prompt:Destroy() end
     end
-    if self.canvas ~= nil and self.gameArea ~= nil
-        and ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA) == self.gameArea then
+    if self.canvas ~= nil and self.labelLayer ~= nil
+        and ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_BOTTOM)
+            == self.labelLayer then
         self.canvas:Destroy()
     end
     self:reset()
@@ -768,21 +770,24 @@ end
 
 function UI:ensureMounted()
     local currentGameArea = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
-    if currentGameArea == nil then
+    local bottomBuildLayer = ui.Interfaces:GetComponent(
+        id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_BOTTOM)
+    if currentGameArea == nil or bottomBuildLayer == nil then
         self:destroy()
         return false
     end
 
-    if currentGameArea ~= self.gameArea then
+    if currentGameArea ~= self.gameArea or bottomBuildLayer ~= self.labelLayer then
         self:destroy()
         self.gameArea = currentGameArea
+        self.labelLayer = bottomBuildLayer
     end
 
     if self.canvas ~= nil then
         return true
     end
 
-    self.canvas = ui.Canvas.new(self.gameArea)
+    self.canvas = ui.Canvas.new(self.labelLayer)
     self.canvas:SetPos(0, 0)
     self.canvas:SetSize(0, 0, 1.0, 1.0)
     self.canvas.clickthrough = true
@@ -1516,6 +1521,7 @@ function UI:drawLabels(playerPosition, playerLevel)
     if playerPosition == nil or self.renderDistance == nil then return end
     local distanceSquared = self.renderDistance * self.renderDistance
     local labelHeight = math.max(36, self.labelSize + 16)
+    local origin = self.canvas.xyGlobal
     for _, label in ipairs(self.markerLabels) do
         local position = label.fine.position
         -- Match native distance-to-tile-bounds culling, rather than showing
@@ -1527,8 +1533,8 @@ function UI:drawLabels(playerPosition, playerLevel)
             local centre = ScreenConvert.CoordFineToScreen(label.fine, 100)
             if centre ~= nil then
                 self.canvas:AddText(
-                    round(centre.x - 100),
-                    round(centre.y - labelHeight / 2),
+                    round(centre.x - origin.x - 100),
+                    round(centre.y - origin.y - labelHeight / 2),
                     200,
                     labelHeight,
                     label.text,

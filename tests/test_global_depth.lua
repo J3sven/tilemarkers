@@ -188,6 +188,7 @@ local UI = require("src/ui")
 UI:init({}, prettyui, draw)
 expect(UI:isHoverPreviewEnabled(), true, "hover preview defaults on")
 UI.canvas = {
+    xyGlobal = { x = 0, y = 0 },
     Clear = function() label = nil end,
     AddText = function(_, x, y, width, height, text, textConfig)
         label = {
@@ -289,6 +290,13 @@ local originalProjection = ScreenConvert.CoordFineToScreen
 ScreenConvert.CoordFineToScreen = function() return { x = 150, y = 80 } end
 UI:drawLabels(playerFine.position, playerFine.level)
 expect(label.x, 50, "camera movement repositions a retained label without marker reconciliation")
+UI.canvas.xyGlobal = { x = 25, y = 15 }
+UI:drawLabels(playerFine.position, playerFine.level)
+expect(label.x + UI.canvas.xyGlobal.x + 100, 150,
+    "label stays horizontally aligned when its canvas origin changes")
+expect(label.y + UI.canvas.xyGlobal.y + 18, 80,
+    "label stays vertically aligned when its canvas origin changes")
+UI.canvas.xyGlobal = { x = 0, y = 0 }
 ScreenConvert.CoordFineToScreen = originalProjection
 playerFine.position.x = playerFine.position.x + 30 * 512 + 256
 UI:drawLabels(playerFine.position, playerFine.level)
@@ -886,7 +894,7 @@ UI.presetRenameWindow = nil
 UI.presetExportWindow = retainedPrompt("export")
 UI.presetDeleteWindow = retainedPrompt("delete")
 UI.canvas = { Destroy = function() error("destroy after interface unload") end }
-id.Component = { TOPLEVEL_V2__GAME_AREA = 1 }
+id.Component = { TOPLEVEL_V2__GAME_AREA = 1, TOPLEVEL_V2__PLUGIN_BUILD_LAYER_BOTTOM = 2 }
 ui.Interfaces = { GetComponent = function() return nil end }
 UI:destroy()
 expect(destroyedPrompts.import, true, "missing create prompt does not skip import cleanup")
