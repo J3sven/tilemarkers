@@ -2,8 +2,7 @@ local Codec = require("src/preset_codec")
 local Styles = require("src/styles")
 
 local STORAGE_KEY = "tilePresets"
-local EXPORT_VERSION = 2
-local COLOUR_ENCODING = "hex"
+local STORAGE_VERSION = 3
 local storedData = PersistentDB:GetStructuredData(STORAGE_KEY)
 
 local Presets = {
@@ -77,7 +76,7 @@ end
 
 local function normalizeData(data)
     local normalized = {
-        version = EXPORT_VERSION,
+        version = STORAGE_VERSION,
         nextId = math.max(1, tonumber(data.nextId) or 1),
         activeIds = {},
         presets = {},
@@ -85,8 +84,15 @@ local function normalizeData(data)
     local knownIds = {}
     for _, preset in ipairs(type(data.presets) == "table" and data.presets or {}) do
         if type(preset) == "table" then
-            local tiles = normalizeTiles(preset.tiles)
-            local name = trim(preset.name)
+            local contents = preset
+            if data.version == STORAGE_VERSION then
+                local decodeError
+                contents, decodeError = Codec.decode(preset.token)
+                -- Do not overwrite unreadable stored presets with empty tiles.
+                assert(contents, decodeError)
+            end
+            local tiles = normalizeTiles(contents.tiles)
+            local name = trim(contents.name)
             local id = trim(preset.id)
             if id == "" then
                 id = "preset_" .. tostring(normalized.nextId)
@@ -120,7 +126,6 @@ local function storageData(data)
     local stored = {
         version = data.version,
         nextId = data.nextId,
-        colourEncoding = COLOUR_ENCODING,
         activeIds = {},
         presets = {},
     }
@@ -128,35 +133,24 @@ local function storageData(data)
         stored.activeIds[index] = id
     end
     for presetIndex, preset in ipairs(data.presets) do
-        local storedPreset = {
+        local token = Codec.encode(preset.name, preset.tiles)
+        if token == nil then return nil end
+        stored.presets[presetIndex] = {
             id = preset.id,
-            name = preset.name,
-            tiles = {},
+            token = token,
         }
-        stored.presets[presetIndex] = storedPreset
-        for tileIndex, tile in ipairs(preset.tiles) do
-            storedPreset.tiles[tileIndex] = {
-                x = tile.x,
-                z = tile.z,
-                level = tile.level,
-                label = tile.label,
-                outlineColour = Styles.encodeColour(tile.outlineColour),
-                fillColour = Styles.encodeColour(tile.fillColour),
-                fill = tile.fill,
-                outlineCornersOnly = tile.outlineCornersOnly,
-                outlineThickness = tile.outlineThickness,
-            }
-        end
     end
     return stored
 end
 
 function Presets:save()
     self.revision = self.revision + 1
-    return PersistentDB:SetStructuredData(STORAGE_KEY, storageData(self.data))
+    local stored = storageData(self.data)
+    if stored == nil then return false end
+    return PersistentDB:SetStructuredData(STORAGE_KEY, stored)
 end
 
-if storedData ~= nil and storedData.colourEncoding ~= COLOUR_ENCODING then
+if storedData ~= nil and storedData.version ~= STORAGE_VERSION then
     Presets:save()
 end
 

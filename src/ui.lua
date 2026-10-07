@@ -5,6 +5,7 @@ local UI = {}
 
 local SETTINGS_EVENT_ID = "tilemarkers_settings"
 local CONTENT_EVENT_ID = "tilemarkers_content"
+local PRESET_TOKEN_MAX_LENGTH = 9999
 
 local OUTLINE_COLOUR_STORAGE_KEY = "markerOutlineColour"
 local RECENT_COLOURS_STORAGE_KEY = "recentMarkerColours"
@@ -770,17 +771,17 @@ end
 
 function UI:ensureMounted()
     local currentGameArea = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
-    local bottomBuildLayer = ui.Interfaces:GetComponent(
+    local labelLayer = ui.Interfaces:GetComponent(
         id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_BOTTOM)
-    if currentGameArea == nil or bottomBuildLayer == nil then
+    if currentGameArea == nil or labelLayer == nil then
         self:destroy()
         return false
     end
 
-    if currentGameArea ~= self.gameArea or bottomBuildLayer ~= self.labelLayer then
+    if currentGameArea ~= self.gameArea or labelLayer ~= self.labelLayer then
         self:destroy()
         self.gameArea = currentGameArea
-        self.labelLayer = bottomBuildLayer
+        self.labelLayer = labelLayer
     end
 
     if self.canvas ~= nil then
@@ -950,7 +951,7 @@ function UI:promptForPresetImport()
     self.presetImportWindow = prompt
     self.presetImportInput = prompt:AddTextField({
         placeholder = "Paste TM preset token here",
-        maxLength = 65535,
+        maxLength = PRESET_TOKEN_MAX_LENGTH,
         onSubmit = function() self:finishPresetImport(true) end,
     })
     prompt:AddFancyButton("Import", function()
@@ -1135,15 +1136,25 @@ function UI:promptForPresetExport(presetID, presetName)
         },
     })
     self.presetExportWindow = prompt
-    prompt:AddText({
-        text = "Click the field below, press <col=F2C66D>Ctrl+A</col> to select the full export string, then press <col=F2C66D>Ctrl+C</col> to copy it.",
-        height = 48,
-        maxLines = 2,
-    })
-    self.presetExportInput = prompt:AddTextField({
-        text = token,
-        maxLength = 65535,
-    })
+    if #token > PRESET_TOKEN_MAX_LENGTH then
+        prompt:AddText({
+            text = string.format(
+                "This preset needs %d characters; the sharing field allows %d. Split it into smaller presets to share it. The saved preset is unchanged.",
+                #token, PRESET_TOKEN_MAX_LENGTH),
+            height = 80,
+            maxLines = 4,
+        })
+    else
+        prompt:AddText({
+            text = "Click the field below, press <col=F2C66D>Ctrl+A</col> to select the full export string, then press <col=F2C66D>Ctrl+C</col> to copy it.",
+            height = 48,
+            maxLines = 2,
+        })
+        self.presetExportInput = prompt:AddTextField({
+            text = token,
+            maxLength = PRESET_TOKEN_MAX_LENGTH,
+        })
+    end
     prompt:AddFancyButton("Close", function()
         local exportPrompt = self.presetExportWindow
         self.presetExportWindow = nil

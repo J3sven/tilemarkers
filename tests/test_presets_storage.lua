@@ -7,6 +7,19 @@ end
 
 local saved
 local saveSucceeds = true
+-- Model a bounded structured-data table, rather than an unlimited Lua table.
+-- Large tile collections must not depend on native table-entry capacity.
+local function storedCopy(value)
+    if type(value) ~= "table" then return value end
+    local result = {}
+    local count = 0
+    for key, child in pairs(value) do
+        count = count + 1
+        assert(count <= 127, "structured-data table capacity exceeded")
+        result[key] = storedCopy(child)
+    end
+    return result
+end
 PersistentDB = {
     GetStructuredData = function()
         return {
@@ -34,7 +47,7 @@ PersistentDB = {
         }
     end,
     SetStructuredData = function(_, _, value)
-        if saveSucceeds then saved = value end
+        if saveSucceeds then saved = storedCopy(value) end
         return saveSucceeds
     end,
 }
@@ -48,10 +61,19 @@ equal(0x395E2D8C, tile.fillColour, "preset fill alpha is recovered")
 equal(false, tile.fill, "preset fill toggle is retained")
 equal(true, tile.outlineCornersOnly, "preset corner outline is retained")
 equal(6.5, tile.outlineThickness, "preset thickness is retained")
-equal("hex", saved.colourEncoding, "preset colour encoding is versioned")
-equal("B3489FFF", saved.presets[1].tiles[1].outlineColour, "preset outline saves as hex")
-equal("395E2D8C", saved.presets[1].tiles[1].fillColour, "preset fill saves as hex")
-equal(true, saved.presets[1].tiles[1].outlineCornersOnly, "preset corner outline saves")
+local function reload()
+    package.loaded["src/presets"] = nil
+    return require("src/presets")
+end
+PersistentDB.GetStructuredData = function() return storedCopy(saved) end
+Presets = reload()
+local migratedTile = Presets:get("preset_1").tiles[1]
+for key, value in pairs(tile) do
+    equal(value, migratedTile[key], "migration preserves " .. key)
+end
+equal("Styled", Presets:get("preset_1").name, "migration preserves preset name")
+equal(true, Presets:isActive("preset_1"), "migration preserves activation")
+equal(2, Presets.data.nextId, "migration preserves next ID")
 
 local revisionBeforeEdit = Presets.revision
 equal(true, Presets:updateTiles("preset_1", {
@@ -89,7 +111,7 @@ equal(
     "preset_2",
     Presets:findActiveAt(sourceCoord).id,
     "later active preset matches rendering precedence")
-equal("Edited", saved.presets[1].tiles[1].label, "edited label reaches storage")
+equal("Edited", reload():get("preset_1").tiles[1].label, "edited label survives reload")
 
 local revisionBeforeRollback = Presets.revision
 saveSucceeds = false
@@ -132,9 +154,6 @@ equal(true, Presets:updateTiles("preset_1", mixedStyles), "mixed overrides save"
 local exported, token = Presets:export("preset_1")
 assert(exported, token)
 
-PersistentDB.GetStructuredData = function()
-    return saved
-end
 package.loaded["src/presets"] = nil
 Presets = require("src/presets")
 assertMixedStyles(Presets:get("preset_1"), "reloaded preset")
@@ -184,5 +203,59 @@ equal(previousNextID, Presets.data.nextId, "failed empty creation restores the I
 equal(nil, Presets:get("preset_" .. tostring(previousNextID)), "failed empty creation leaves no preset")
 equal(false, Presets:isActive("preset_" .. tostring(previousNextID)), "failed empty creation leaves no activation")
 saveSucceeds = true
+
+local largePresets = {}
+for presetIndex = 1, 3 do
+    local tiles = {}
+    for index = 1, 2000 do
+        tiles[index] = {
+            x = 3200 + (index - 1) // 64,
+            z = 3200 + (index - 1) % 64,
+            level = presetIndex - 1,
+            label = index % 5 == 0 and "Route " .. (index % 3) or nil,
+            outlineColour = 0x12345678,
+            fillColour = 0xABCDEF12,
+            outlineCornersOnly = index % 2 == 0,
+            outlineThickness = 6.5,
+        }
+        if index % 3 ~= 2 then tiles[index].fill = index % 3 == 0 end
+    end
+    local success, preset = Presets:create("Large route " .. presetIndex, tiles, true)
+    assert(success, preset)
+    largePresets[#largePresets + 1] = preset
+end
+
+local function assertPreset(expected, actual, context)
+    equal(expected.name, actual.name, context .. " name")
+    equal(#expected.tiles, #actual.tiles, context .. " tile count")
+    for index, expectedTile in ipairs(expected.tiles) do
+        for _, field in ipairs({
+            "x", "z", "level", "label", "outlineColour", "fillColour",
+            "fill", "outlineCornersOnly", "outlineThickness",
+        }) do
+            equal(expectedTile[field], actual.tiles[index][field],
+                context .. " tile " .. index .. " " .. field)
+        end
+    end
+end
+
+Presets = reload()
+for _, expected in ipairs(largePresets) do
+    assertPreset(expected, Presets:get(expected.id), "large storage reload")
+    equal(true, Presets:isActive(expected.id), "large preset stays active")
+    local success, shareToken = Presets:export(expected.id)
+    assert(success, shareToken)
+    assert(#shareToken <= 9999, "large route fits the native sharing field")
+    local success, imported = Presets:import(shareToken)
+    assert(success, imported)
+    assertPreset(expected, imported, "large import")
+    assertPreset(expected, reload():get(imported.id), "large import reload")
+end
+
+local editedLarge = largePresets[1]
+table.remove(editedLarge.tiles, 128)
+editedLarge.tiles[128].label = "Edited beyond old limit"
+equal(true, Presets:updateTiles(editedLarge.id, editedLarge.tiles), "large edit saves")
+assertPreset(editedLarge, reload():get(editedLarge.id), "large edit reload")
 
 print("test_presets_storage: ok")

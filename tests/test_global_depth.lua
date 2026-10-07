@@ -133,7 +133,11 @@ local prettyui = {
                 promptTexts[#promptTexts + 1] = options
             end
             function window:AddTextField(fieldOptions)
-                local field = { value = fieldOptions.text or "", options = fieldOptions }
+                assert(fieldOptions.maxLength <= 9999, "native input capacity exceeded")
+                local field = {
+                    value = (fieldOptions.text or ""):sub(1, fieldOptions.maxLength),
+                    options = fieldOptions,
+                }
                 function field:GetText() return self.value end
                 promptInput = field
                 return field
@@ -487,6 +491,7 @@ local importedPresetToken
 local renamedPresetID
 local renamedPresetName
 local deletedPresetID
+local exportToken = string.rep("A", 9999)
 UI.presetHandlers = {
     list = function() return {} end,
     isActive = function() return false end,
@@ -513,7 +518,7 @@ UI.presetHandlers = {
         return true
     end,
     export = function()
-        return true, "TM2export"
+        return true, exportToken
     end,
 }
 
@@ -564,13 +569,16 @@ expect(
     UI:promptForPresetExport("preset_1", "New name"),
     true,
     "export preset popup opens")
-expect(promptWindowOptions.height, 192, "export popup fits its content")
-expect(
-    promptTexts[1].text,
-    "Click the field below, press <col=F2C66D>Ctrl+A</col> to select the full export string, then press <col=F2C66D>Ctrl+C</col> to copy it.",
-    "export popup explains keyboard copy workflow")
-expect(promptInput.value, "TM2export", "export popup exposes the preset token")
+expect(UI.presetExportInput:GetText(), exportToken, "maximum-length export is not truncated")
 promptButtons.Close()
+
+exportToken = exportToken .. "A"
+expect(UI:promptForPresetExport("preset_1", "Large"), true, "oversized export opens a warning")
+expect(UI.presetExportInput, nil, "oversized export never exposes a truncated token")
+assert(promptTexts[1].text:find("10000", 1, true), "warning reports required character count")
+assert(promptTexts[1].text:find("9999", 1, true), "warning reports sharing capacity")
+promptButtons.Close()
+expect(UI:isPromptOpen(), false, "oversized export warning closes")
 
 local editOverlay
 local makeControl
