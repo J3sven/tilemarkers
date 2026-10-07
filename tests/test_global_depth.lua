@@ -11,8 +11,27 @@ end
 local storedRecentColours
 local storedHoverPreview
 local storedRendering = {}
+local storedMarkingKeybind
+GameKey = { CONTROL = 82, SHIFT = 81, K = 55 }
+local heldKeys = {}
+local capturingKeybind = false
+Keyboard = {
+    IsAvailable = function() return true end,
+    IsBlocked = function() return false end,
+}
 PersistentDB = {
     GetString = function() return nil end,
+    GetStructuredData = function(_, key)
+        if key == "markerKeybind" and storedMarkingKeybind ~= nil then
+            return { table.unpack(storedMarkingKeybind) }
+        end
+    end,
+    SetStructuredData = function(_, key, value)
+        if key == "markerKeybind" then
+            storedMarkingKeybind = { table.unpack(value) }
+        end
+        return true
+    end,
     GetInt = function(_, key)
         if key == "markerFontSize" then return 19 end
         if key == "markerOutlineThicknessTenths" then return 35 end
@@ -119,6 +138,16 @@ Event = {
     },
 }
 local prettyui = {
+    KeybindField = {
+        IsCapturing = function() return capturingKeybind end,
+        IsDown = function(value)
+            if capturingKeybind or #value == 0 then return false end
+            for _, key in ipairs(value) do
+                if not heldKeys[key] then return false end
+            end
+            return true
+        end,
+    },
     Window = {
         new = function(_, options)
             promptWindowOptions = options
@@ -645,6 +674,10 @@ makeControl = function()
         return child
     end
     control.AddTextField = addControl
+    control.AddKeybindField = function(self, options)
+        self.keybindOptions = options
+        return addControl(self, options)
+    end
     control.Close = function() end
     control.Select = function() end
     control.SetDisabled = function() end
@@ -672,6 +705,7 @@ makeControl = function()
 end
 
 UI.prettyui = {
+    KeybindField = prettyui.KeybindField,
     SimpleView = {
         new = function(parent)
             local view = makeControl()
@@ -723,6 +757,37 @@ local markerOptions = UI.settingsView.addedComponents[1]
 markerOptions.options.onChange(nil, nil, "hover_preview", false)
 expect(UI:isHoverPreviewEnabled(), false, "hover preview toggle updates runtime state")
 expect(storedHoverPreview, false, "hover preview toggle persists")
+
+local keybindOptions = UI.settingsView.keybindOptions
+heldKeys = { [GameKey.CONTROL] = true, [GameKey.SHIFT] = true }
+expect(UI:isMarkingKeybindDown(), true, "unset override uses Ctrl+Shift")
+keybindOptions.onChange(nil, { GameKey.K })
+expect(UI:isMarkingKeybindDown(), false, "override replaces the default chord")
+heldKeys = { [GameKey.K] = true }
+expect(UI:isMarkingKeybindDown(), true, "single-key override activates marking")
+local keybindLibrary = UI.prettyui
+UI:init(UI.presetHandlers, keybindLibrary, draw)
+expect(UI:isMarkingKeybindDown(), true, "single-key override survives reload")
+keybindOptions.onChange(nil, { GameKey.CONTROL, GameKey.K })
+expect(UI:isMarkingKeybindDown(), false, "two-key override requires both keys")
+heldKeys[GameKey.CONTROL] = true
+UI:init(UI.presetHandlers, keybindLibrary, draw)
+expect(UI:isMarkingKeybindDown(), true, "two-key override survives reload")
+capturingKeybind = true
+expect(UI:isMarkingKeybindDown(), false, "capture suppresses the active override")
+capturingKeybind = false
+keybindOptions.onChange(nil, {})
+expect(UI:isMarkingKeybindDown(), false, "clear discards the custom chord")
+heldKeys = { [GameKey.CONTROL] = true, [GameKey.SHIFT] = true }
+expect(UI:isMarkingKeybindDown(), true, "clearing restores default marking")
+UI:init(UI.presetHandlers, keybindLibrary, draw)
+expect(UI:isMarkingKeybindDown(), true, "cleared override keeps fallback after reload")
+keybindOptions.onChange(nil, { GameKey.K })
+keybindOptions.onChange(nil, keybindOptions.defaultValue)
+UI:init(UI.presetHandlers, keybindLibrary, draw)
+expect(UI:isMarkingKeybindDown(), true, "context reset restores persisted default")
+heldKeys = { [GameKey.K] = true }
+expect(UI:isMarkingKeybindDown(), false, "reset removes the custom override")
 
 local inheritedMarker = UI:getStyle()
 local renderingOptions = markerOptions.options

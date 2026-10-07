@@ -38,12 +38,19 @@ local playerPosition = { x = 10 * 512 + 256, y = 0, z = 10 * 512 + 256 }
 local controlDown = false
 local shiftDown = false
 local keyboardBlocked = false
+local customKeyDown = false
+local capturingKeybind = false
+GameKey = { CONTROL = 82, SHIFT = 81, K = 55 }
 
 Keyboard = {
     IsAvailable = function() return true end,
     IsBlocked = function() return keyboardBlocked end,
-    IsControlDown = function() return controlDown end,
-    IsShiftDown = function() return shiftDown end,
+    IsGameKeyDown = function(key)
+        if key == GameKey.CONTROL then return controlDown end
+        if key == GameKey.SHIFT then return shiftDown end
+        if key == GameKey.K then return customKeyDown end
+        return false
+    end,
 }
 Mouse = {
     IsAvailable = function() return true end,
@@ -316,7 +323,23 @@ local clearConfirmation
 local initializedPresetHandlers
 local promptedPresetCreationVisible
 local promptedPresetImport = false
+local actualUI = require("src/ui")
 local UI = {
+    markingKeybind = {},
+    prettyui = {
+        KeybindField = {
+            IsCapturing = function() return capturingKeybind end,
+            IsDown = function(value)
+                if capturingKeybind or #value == 0 then return false end
+                for _, key in ipairs(value) do
+                    if not Keyboard.IsGameKeyDown(key) then return false end
+                end
+                return true
+            end,
+        },
+    },
+    isMarkingKeybindDown = actualUI.isMarkingKeybindDown,
+    isKeybindCapturing = actualUI.isKeybindCapturing,
     init = function(_, handlers)
         initializedPresetHandlers = handlers
     end,
@@ -440,6 +463,42 @@ local function findMenuEntry(menu, label)
     end
     return nil
 end
+
+UI.markingKeybind = { GameKey.K }
+frame()
+equal(nil, drawnHover, "custom keybind replaces Ctrl+Shift for preview")
+equal(nil, findMenuEntry(readyMenu(), "Mark tile"),
+    "custom keybind replaces Ctrl+Shift for menu actions")
+customKeyDown = true
+frame()
+equal(hover, drawnHover, "single-key override previews the hovered tile")
+local customMark = findMenuEntry(readyMenu(), "Mark tile")
+assert(customMark, "single-key override enables tile marking")
+UI.markingKeybind = { GameKey.CONTROL, GameKey.K }
+controlDown = false
+frame()
+equal(nil, drawnHover, "partial custom chord does not preview")
+equal(nil, findMenuEntry(readyMenu(), "Mark tile"),
+    "partial custom chord does not enable marking")
+controlDown = true
+frame()
+equal(hover, drawnHover, "complete custom chord enables preview")
+assert(findMenuEntry(readyMenu(), "Mark tile"), "complete custom chord enables marking")
+miniMenuOpen = true
+capturingKeybind = true
+frame()
+equal(nil, drawnHover, "capture hides an existing menu hover")
+customMark.action(table.unpack(customMark.args, 1, customMark.args.n))
+equal(false, marked, "capture blocks marking from a previously opened menu")
+equal(nil, findMenuEntry(readyMenu(), "Mark tile"),
+    "capture suppresses new marking menu actions")
+miniMenuOpen = false
+capturingKeybind = false
+UI.markingKeybind = {}
+customKeyDown = false
+frame()
+equal(hover, drawnHover, "cleared override restores Ctrl+Shift preview")
+assert(findMenuEntry(readyMenu(), "Mark tile"), "cleared override restores default menu binding")
 
 local visibleSourceA = { name = "visible A" }
 local visibleSourceB = { name = "visible B" }

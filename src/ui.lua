@@ -16,6 +16,8 @@ local IGNORE_DEPTH_STORAGE_KEY = "markerIgnoreDepth"
 local HOVER_PREVIEW_STORAGE_KEY = "markerHoverPreview"
 local FILL_STORAGE_KEY = "markerFill"
 local OUTLINE_CORNERS_STORAGE_KEY = "markerOutlineCornersOnly"
+local MARKING_KEYBIND_STORAGE_KEY = "markerKeybind"
+local DEFAULT_MARKING_KEYBIND = { GameKey.CONTROL, GameKey.SHIFT }
 local EMPTY_HOVER_STYLE = {
     outlineColour = 0xFFFFFF90,
     fillColour = 0xFFFFFF38,
@@ -209,6 +211,8 @@ function UI:init(presetHandlers, prettyUILibrary, drawLibrary)
     self.ignoreDepth = PersistentDB:GetBool(IGNORE_DEPTH_STORAGE_KEY) == true
     self.hoverPreviewEnabled =
         PersistentDB:GetBool(HOVER_PREVIEW_STORAGE_KEY) ~= false
+    self.markingKeybind =
+        PersistentDB:GetStructuredData(MARKING_KEYBIND_STORAGE_KEY) or DEFAULT_MARKING_KEYBIND
     self.globalStyle = {
         fill = PersistentDB:GetBool(FILL_STORAGE_KEY) == true,
         outlineCornersOnly = PersistentDB:GetBool(OUTLINE_CORNERS_STORAGE_KEY) == true,
@@ -572,6 +576,18 @@ function UI:isHoverPreviewEnabled()
     return self.hoverPreviewEnabled ~= false
 end
 
+function UI:isMarkingKeybindDown()
+    local value = #self.markingKeybind > 0
+        and self.markingKeybind or DEFAULT_MARKING_KEYBIND
+    return Keyboard.IsAvailable()
+        and not Keyboard.IsBlocked()
+        and self.prettyui.KeybindField.IsDown(value)
+end
+
+function UI:isKeybindCapturing()
+    return self.prettyui.KeybindField.IsCapturing()
+end
+
 
 
 function UI:mountSettings(parent)
@@ -600,7 +616,7 @@ function UI:mountSettings(parent)
             text = "Show hover preview",
             value = "hover_preview",
             selected = self.hoverPreviewEnabled,
-            tooltip = "Preview the tile under the cursor while Ctrl+Shift is held.",
+            tooltip = "Preview the tile under the cursor while the marking keybind is held.",
         },
         {
             text = "Render fill",
@@ -702,7 +718,17 @@ function UI:mountSettings(parent)
                 LABEL_SIZE_SORTED_POSITION[requestedLabelSizeEntry])
         end
     end
-    self.settingsView:AddText("Hold Ctrl+Shift over a tile, then right-click to mark it or edit its marker.")
+    self.settingsView:AddText("Tilemarking keybind")
+    self.settingsView:AddKeybindField({
+        width = 344,
+        value = self.markingKeybind,
+        defaultValue = DEFAULT_MARKING_KEYBIND,
+        onChange = function(_, value)
+            self.markingKeybind = value
+            PersistentDB:SetStructuredData(MARKING_KEYBIND_STORAGE_KEY, value)
+        end,
+    })
+    self.settingsView:AddText("Right-click a tile while holding the keybind to mark it or edit its marker.")
 
     self:updateStyleControls()
 end

@@ -35,13 +35,6 @@ local function hoveredTile()
     return ScreenConvert.ScreenToCoordGrid(mousePosition)
 end
 
-local function markingModifiersDown()
-    return Keyboard.IsAvailable()
-        and not Keyboard.IsBlocked()
-        and Keyboard.IsControlDown()
-        and Keyboard.IsShiftDown()
-end
-
 local function moveBelowNativeTop(miniMenu, nativeEntryCount, customCount)
     if nativeEntryCount < 1 or customCount < 1 then return end
     local totalEntryCount = nativeEntryCount + customCount
@@ -97,6 +90,7 @@ local function appendWorldMapAction(miniMenu)
 end
 
 local function setTileMarked(store, source, marked)
+    if UI:isKeybindCapturing() then return end
     if not marked then
         store:remove(source)
         return
@@ -146,7 +140,7 @@ local function onReady(miniMenuReadyEvent)
         return
     end
 
-    if not markingModifiersDown() or UI:isPromptOpen() then
+    if not UI:isMarkingKeybindDown() or UI:isPromptOpen() then
         menuHover = nil
         suppressedMousePosition = nil
         return
@@ -205,8 +199,9 @@ local function onClosed()
 end
 
 function Minimenu.getHover()
+    if UI:isKeybindCapturing() then return nil end
     local menuOpen = MiniMenu.IsOpen()
-    local modifiersDown = markingModifiersDown()
+    local modifiersDown = UI:isMarkingKeybindDown()
     if not menuOpen and not modifiersDown then
         suppressedMousePosition = nil
     end
