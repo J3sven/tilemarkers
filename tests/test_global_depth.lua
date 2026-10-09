@@ -521,6 +521,16 @@ local renamedPresetID
 local renamedPresetName
 local deletedPresetID
 local exportToken = string.rep("A", 9999)
+local startedCreatedPresetID
+local startedCreatedPresetName
+local startedCreatedPresetCount = 0
+local originalStartPresetEdit = UI.startPresetEdit
+UI.startPresetEdit = function(_, presetID, presetName)
+    startedCreatedPresetID = presetID
+    startedCreatedPresetName = presetName
+    startedCreatedPresetCount = startedCreatedPresetCount + 1
+    return true
+end
 UI.presetHandlers = {
     list = function() return {} end,
     isActive = function() return false end,
@@ -556,6 +566,9 @@ expect(promptWindowOptions.title, "Add preset", "add preset popup is titled")
 promptInput.value = "  New route  "
 promptButtons.Save()
 expect(createdPresetName, "New route", "add preset popup trims and saves its name")
+expect(startedCreatedPresetID, "created_preset", "new empty preset immediately starts editing")
+expect(startedCreatedPresetName, "New route", "new preset edit overlay uses its name")
+expect(startedCreatedPresetCount, 1, "new empty preset starts editing once")
 
 expect(UI:promptForPresetCreation(true), true, "visible preset popup opens")
 expect(
@@ -568,6 +581,8 @@ expect(
     createdVisiblePresetName,
     "Visible route",
     "visible preset popup uses visible creation handler")
+expect(startedCreatedPresetCount, 1, "visible-marker creation does not enter edit mode")
+UI.startPresetEdit = originalStartPresetEdit
 
 expect(UI:promptForPresetImport(), true, "import preset popup opens")
 expect(promptWindowOptions.height, 176, "import popup fits its content")

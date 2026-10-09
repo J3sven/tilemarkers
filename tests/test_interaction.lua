@@ -213,6 +213,7 @@ local Tiles = {
 
 local createdPresetName
 local createdPresetTiles
+local createdPresetActive
 local deletedPresetID
 local excludedPresetID
 local updatedPresetID
@@ -224,9 +225,10 @@ local Presets = {
     list = function() return {} end,
     isActive = function() return false end,
     setActive = function() return true end,
-    create = function(_, name, tiles)
+    create = function(_, name, tiles, active)
         createdPresetName = name
         createdPresetTiles = tiles
+        createdPresetActive = active
         return true, { id = "preset_test", name = name }
     end,
     rename = function() return true end,
@@ -556,6 +558,14 @@ local cleared = {}
 for _, coord in ipairs(clearedSources) do cleared[coord] = true end
 equal(true, cleared[visibleSourceA], "clear action includes the first visible marker")
 equal(true, cleared[visibleSourceB], "clear action includes the second visible marker")
+
+equal(
+    true,
+    initializedPresetHandlers.create("Blank route"),
+    "preset UI creation handler succeeds")
+equal("Blank route", createdPresetName, "preset UI creation keeps submitted name")
+equal(nil, next(createdPresetTiles), "preset UI creation starts with no tiles")
+equal(true, createdPresetActive, "new blank preset is active while being edited")
 
 createVisibleEntry.action()
 equal(true, promptedPresetCreationVisible, "world map action opens visible preset popup")

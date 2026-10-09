@@ -851,9 +851,10 @@ end
 
 function UI:finishPresetCreation(accepted)
     local prompt = self.presetCreateWindow
+    local createFromVisible = self.presetCreateVisible == true
     local createdPreset
     if accepted then
-        local handler = self.presetCreateVisible
+        local handler = createFromVisible
             and self.presetHandlers.createVisible
             or self.presetHandlers.create
         local success
@@ -867,13 +868,18 @@ function UI:finishPresetCreation(accepted)
     self.presetCreateVisible = nil
     if prompt ~= nil and prompt.root ~= nil then prompt:Close() end
     if accepted then
-        self:rebuildPresetPanels(
-            type(createdPreset) == "table" and createdPreset.id or nil)
+        local createdPresetID =
+            type(createdPreset) == "table" and createdPreset.id or nil
+        self:rebuildPresetPanels(createdPresetID)
+        if not createFromVisible and createdPresetID ~= nil then
+            self:startPresetEdit(createdPresetID, createdPreset.name)
+        end
     end
 end
 
 function UI:promptForPresetCreation(visibleOnly)
-    if self:isPromptOpen() or self.gameArea == nil then return false end
+    if self:isPromptOpen() or self.presetEditOverlay ~= nil
+        or self.gameArea == nil then return false end
     local width, height = 352, 176
     local x, y = centredPopupPosition(self, width, height)
     self.presetCreateVisible = visibleOnly == true
